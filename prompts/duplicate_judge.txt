@@ -1,0 +1,28 @@
+请根据新信访件与候选历史案件，判断是否属于重复举报，并输出严格合法 JSON。
+
+要求：
+1. 只输出 JSON，不要输出 Markdown。
+2. `is_duplicate` 只能是 `true` 或 `false`。
+3. `ranked_cases` 只保留最相关的前 {top_n} 个案件。
+4. `similarity_score` 取 0-100 的整数。
+5. `reason` 使用中文，明确指出人物、地点、事实、时间等重合点。
+6. 如果整体不构成重复举报，`is_duplicate=false`，`ranked_cases` 可以为空数组。
+
+新案件：
+{new_case}
+
+候选案件：
+{candidates}
+
+输出格式：
+{{
+  "is_duplicate": true,
+  "ranked_cases": [
+    {{
+      "case_id": "CASE-0001",
+      "similarity_score": 88,
+      "rank": 1,
+      "reason": "被举报人、属地和核心违纪事实高度重合。"
+    }}
+  ]
+}}
