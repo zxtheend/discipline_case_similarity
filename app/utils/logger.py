@@ -4,6 +4,18 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 
+class SuppressSuccessfulEmbeddingsFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "httpx":
+            return True
+        message = record.getMessage()
+        if "HTTP Request:" not in message:
+            return True
+        if "/embeddings" not in message:
+            return True
+        return " 200 OK" not in message and '"200 OK"' not in message
+
+
 class JsonFormatter(logging.Formatter):
     _reserved = {
         "name",
@@ -44,8 +56,17 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+def _ensure_httpx_filter() -> None:
+    httpx_logger = logging.getLogger("httpx")
+    for current_filter in httpx_logger.filters:
+        if isinstance(current_filter, SuppressSuccessfulEmbeddingsFilter):
+            return
+    httpx_logger.addFilter(SuppressSuccessfulEmbeddingsFilter())
+
+
 def configure_logging(level: str = "INFO") -> None:
     root_logger = logging.getLogger()
+    _ensure_httpx_filter()
     if root_logger.handlers:
         for handler in root_logger.handlers:
             handler.setFormatter(JsonFormatter())

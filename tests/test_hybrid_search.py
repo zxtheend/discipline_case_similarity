@@ -32,8 +32,8 @@ class HybridSearchTests(unittest.TestCase):
         merged = reciprocal_rank_fusion(dense_hits, sparse_hits, request, k=60, limit=10)
 
         self.assertEqual(len(merged), 2)
-        self.assertEqual(merged[0].case_id, "CASE-1")
-        self.assertGreater(merged[0].hybrid_score, merged[1].hybrid_score)
+        self.assertEqual({candidate.case_id for candidate in merged}, {"CASE-1", "CASE-2"})
+        self.assertAlmostEqual(merged[0].hybrid_score, merged[1].hybrid_score)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,82 @@
+[
+  {
+    "scenario_id": "same-person-wjg-project-vs-cadre-adjustment",
+    "category": "same_person_diff_fact",
+    "query": {
+      "reported_persons": ["王建国"],
+      "reporter": "项目知情人",
+      "location": "太原市",
+      "description": "反映王建国在城改配套工程里收老板礼金，还指定亲戚承包附属工程。",
+      "time_range_years": 5
+    },
+    "expected_top1": null,
+    "expected_in_top3": ["CASE-0001", "CASE-0002"],
+    "expected_in_top5": ["CASE-0003"],
+    "expected_not_in_top5": ["CASE-0025"],
+    "notes": "验证同一被举报人下，项目收礼案件应排在干部调整收礼前面。"
+  },
+  {
+    "scenario_id": "same-fact-zhaozhiqiang-vs-lizhiqiang",
+    "category": "same_fact_diff_person",
+    "query": {
+      "reported_persons": ["赵志强"],
+      "reporter": "学生家长",
+      "location": "大同市",
+      "description": "举报赵志强在校服采购中指定供应商、收回扣。",
+      "time_range_years": 5
+    },
+    "expected_top1": null,
+    "expected_in_top3": ["CASE-0006", "CASE-0007"],
+    "expected_in_top5": [],
+    "expected_not_in_top5": ["CASE-0026"],
+    "notes": "验证人物过滤生效，事实相近但人物不同的案件不能进入 Top5。"
+  },
+  {
+    "scenario_id": "same-location-zhangmingliang-land-vs-urban-management",
+    "category": "same_location_diff_department",
+    "query": {
+      "reported_persons": ["张明亮"],
+      "reporter": "村民代表",
+      "location": "朔州市",
+      "description": "反映张明亮在征地补偿审核中偏向关系户，多发补偿款。",
+      "time_range_years": 5
+    },
+    "expected_top1": "CASE-0021",
+    "expected_in_top3": ["CASE-0020"],
+    "expected_in_top5": [],
+    "expected_not_in_top5": ["CASE-0031"],
+    "notes": "验证同地同人但不同部门的高混淆案件不会压过征地补偿主案。"
+  },
+  {
+    "scenario_id": "paraphrase-wjg-colloquial-project-bribery",
+    "category": "paraphrase_colloquial",
+    "query": {
+      "reported_persons": ["王建国"],
+      "reporter": "工地人员",
+      "location": "太原市",
+      "description": "有人说老王在城改工地拿了老板红包，还点名让亲戚接活。",
+      "time_range_years": 5
+    },
+    "expected_top1": null,
+    "expected_in_top3": ["CASE-0001", "CASE-0002"],
+    "expected_in_top5": ["CASE-0028"],
+    "expected_not_in_top5": ["CASE-0027"],
+    "notes": "验证口语化和近义改写后，项目受贿主案仍然能稳定排进前列。"
+  },
+  {
+    "scenario_id": "alias-luan-group-procurement-kickback",
+    "category": "alias_abbreviation",
+    "query": {
+      "reported_persons": ["潞安集团"],
+      "reporter": "企业员工",
+      "location": "长治市",
+      "description": "反映潞安集团在设备采购里指定品牌，还收了回扣。",
+      "time_range_years": 5
+    },
+    "expected_top1": "CASE-0029",
+    "expected_in_top3": [],
+    "expected_in_top5": [],
+    "expected_not_in_top5": ["CASE-0030"],
+    "notes": "验证简称查询下，设备采购回扣案件应优先于同简称的招聘违纪案件。"
+  }
+]

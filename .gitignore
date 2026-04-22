@@ -5,3 +5,9 @@ __pycache__/
 .pytest_cache/
 data/
 .DS_Store
+.vscode/
+*.tar
+ranking_eval_report.json
+docs/case_similarity_source.sql
+docs/t_xf_wtxx.sql
+docs/t_xf_xfj.sql

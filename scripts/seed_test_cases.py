@@ -13,8 +13,16 @@ from app.config import get_settings
 
 try:
     import aiomysql
-except ImportError as exc:  # pragma: no cover - runtime dependency check
-    raise SystemExit("aiomysql is required to seed MySQL test data.") from exc
+except ImportError:  # pragma: no cover - runtime dependency check
+    aiomysql = None
+
+
+def serialize_reported_persons(reported_persons: List[str]) -> str:
+    return json.dumps(
+        [{"mc": name} for name in reported_persons],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
 
 def build_sample_cases() -> List[Dict[str, object]]:
@@ -307,10 +315,96 @@ def build_sample_cases() -> List[Dict[str, object]]:
             "status": "ACTIVE",
             "extra_json": {"tags": ["非重复对照"]},
         },
+        {
+            "case_id": "CASE-0025",
+            "reported_persons": ["王建国"],
+            "reporter": "组织口知情人",
+            "location": "太原市",
+            "location_district": "万柏林区",
+            "description_text": "反映万柏林区住建局副局长王建国在干部调整中收受礼品，并帮亲属办理借调手续。",
+            "create_time": "2024-08-08 09:25:00",
+            "updated_at": "2024-08-08 09:25:00",
+            "status": "ACTIVE",
+            "extra_json": {"tags": ["同人不同事", "干部调整"]},
+        },
+        {
+            "case_id": "CASE-0026",
+            "reported_persons": ["李志强"],
+            "reporter": "学生家长",
+            "location": "大同市",
+            "location_district": "平城区",
+            "description_text": "反映平城区教育局采购办李志强指定某公司中标校服采购并收受回扣。",
+            "create_time": "2024-08-09 10:15:00",
+            "updated_at": "2024-08-09 10:15:00",
+            "status": "ACTIVE",
+            "extra_json": {"tags": ["同事不同人", "教育采购"]},
+        },
+        {
+            "case_id": "CASE-0027",
+            "reported_persons": ["王建国"],
+            "reporter": "群众",
+            "location": "太原市",
+            "location_district": "万柏林区",
+            "description_text": "举报万柏林区民政局干部王建国在低保审核中优亲厚友，违规照顾熟人。",
+            "create_time": "2024-08-12 15:40:00",
+            "updated_at": "2024-08-12 15:40:00",
+            "status": "ACTIVE",
+            "extra_json": {"tags": ["同地不同部门", "低保审核"]},
+        },
+        {
+            "case_id": "CASE-0028",
+            "reported_persons": ["王建国"],
+            "reporter": "工地人员",
+            "location": "太原市",
+            "location_district": "万柏林区",
+            "description_text": "有人反映老王在城改工地拿了老板红包，还点名让亲戚接活。",
+            "create_time": "2024-08-14 11:05:00",
+            "updated_at": "2024-08-14 11:05:00",
+            "status": "ACTIVE",
+            "extra_json": {"tags": ["近义改写", "口语化"]},
+        },
+        {
+            "case_id": "CASE-0029",
+            "reported_persons": ["潞安矿业集团", "潞安集团"],
+            "reporter": "企业员工",
+            "location": "长治市",
+            "location_district": "潞州区",
+            "description_text": "反映潞安矿业集团在设备采购中指定品牌，并向供应商收取回扣。",
+            "create_time": "2024-08-18 14:10:00",
+            "updated_at": "2024-08-18 14:10:00",
+            "status": "ACTIVE",
+            "extra_json": {"tags": ["简称别名", "设备采购"]},
+        },
+        {
+            "case_id": "CASE-0030",
+            "reported_persons": ["潞安集团"],
+            "reporter": "匿名",
+            "location": "长治市",
+            "location_district": "潞州区",
+            "description_text": "举报潞安集团在招聘中违规安排亲属入职，存在打招呼现象。",
+            "create_time": "2024-08-21 16:30:00",
+            "updated_at": "2024-08-21 16:30:00",
+            "status": "ACTIVE",
+            "extra_json": {"tags": ["简称别名", "招聘违纪"]},
+        },
+        {
+            "case_id": "CASE-0031",
+            "reported_persons": ["张明亮"],
+            "reporter": "街道群众",
+            "location": "朔州市",
+            "location_district": "朔城区",
+            "description_text": "反映朔城区城管局张明亮在违建拆除中收受烟酒，对熟人少罚多放。",
+            "create_time": "2024-08-22 09:45:00",
+            "updated_at": "2024-08-22 09:45:00",
+            "status": "ACTIVE",
+            "extra_json": {"tags": ["同地不同部门", "城市管理"]},
+        },
     ]
 
 
 async def seed_cases(args) -> None:
+    if aiomysql is None:  # pragma: no cover - runtime dependency check
+        raise SystemExit("aiomysql is required to seed MySQL test data.")
     settings = get_settings()
     connection = await aiomysql.connect(
         host=settings.mysql_host,
@@ -351,21 +445,19 @@ async def seed_cases(args) -> None:
                 legacy_rows.append(
                     (
                         item["case_id"],
-                        json.dumps(item["reported_persons"], ensure_ascii=False),
-                        item["reporter"],
+                        petition_id,
+                        petition_id,
                         item["location"],
-                        item["location_district"],
-                        item["description_text"],
+                        serialize_reported_persons(item["reported_persons"]),
+                        item["reporter"],
+                        item["description_text"].encode("utf-8"),
                         item["create_time"],
-                        item["updated_at"],
-                        item["status"],
-                        json.dumps(item["extra_json"], ensure_ascii=False),
                     )
                 )
                 xfj_rows.append(
                     (
                         petition_id,
-                        ",".join(item["reported_persons"]),
+                        serialize_reported_persons(item["reported_persons"]),
                         item["reporter"],
                         item["location"],
                         item["create_time"],
@@ -385,26 +477,22 @@ async def seed_cases(args) -> None:
                 """
                 INSERT INTO {source_table} (
                     case_id,
-                    reported_persons_json,
-                    reporter,
+                    source_wtxx_bh,
+                    petition_id,
                     location,
-                    location_district,
-                    description_text,
-                    create_time,
-                    updated_at,
-                    status,
-                    extra_json
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) AS incoming
+                    encrypted_reported_persons,
+                    encrypted_reporter,
+                    encrypted_description,
+                    create_time
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) AS incoming
                 ON DUPLICATE KEY UPDATE
-                    reported_persons_json = incoming.reported_persons_json,
-                    reporter = incoming.reporter,
+                    source_wtxx_bh = incoming.source_wtxx_bh,
+                    petition_id = incoming.petition_id,
                     location = incoming.location,
-                    location_district = incoming.location_district,
-                    description_text = incoming.description_text,
-                    create_time = incoming.create_time,
-                    updated_at = incoming.updated_at,
-                    status = incoming.status,
-                    extra_json = incoming.extra_json
+                    encrypted_reported_persons = incoming.encrypted_reported_persons,
+                    encrypted_reporter = incoming.encrypted_reporter,
+                    encrypted_description = incoming.encrypted_description,
+                    create_time = incoming.create_time
                 """.format(source_table=settings.mysql_source_table),
                 legacy_rows,
             )

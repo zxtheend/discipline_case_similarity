@@ -3,7 +3,7 @@ from typing import Any, List, Optional
 
 from app.config import Settings
 from app.errors import ServiceError
-from app.models.domain import JoinedSourceRow
+from app.models.domain import JoinedSourceRow, SourceTableRow
 
 try:  # pragma: no cover - dependency is optional during local scaffolding
     import aiomysql
@@ -47,6 +47,33 @@ class MySQLService:
                 rows = await db_cursor.fetchall()
         return [self._parse_joined_row(row) for row in rows]
 
+    async def fetch_source_rows(
+        self,
+        limit: int,
+        last_case_id: Optional[str] = None,
+    ) -> List[SourceTableRow]:
+        pool = await self._ensure_pool()
+        query, params = self._build_source_fetch_query(
+            limit=limit,
+            last_case_id=last_case_id,
+        )
+        async with pool.acquire() as connection:
+            async with connection.cursor(aiomysql.DictCursor) as db_cursor:
+                await db_cursor.execute(query, params)
+                rows = await db_cursor.fetchall()
+        return [self._parse_source_row(row) for row in rows]
+
+    async def fetch_source_row_by_case_id(self, case_id: str) -> Optional[SourceTableRow]:
+        pool = await self._ensure_pool()
+        query, params = self._build_source_fetch_by_case_id_query(case_id)
+        async with pool.acquire() as connection:
+            async with connection.cursor(aiomysql.DictCursor) as db_cursor:
+                await db_cursor.execute(query, params)
+                row = await db_cursor.fetchone()
+        if row is None:
+            return None
+        return self._parse_source_row(row)
+
     async def _ensure_pool(self):
         if aiomysql is None:
             raise ServiceError(
@@ -86,7 +113,7 @@ class MySQLService:
         query = """
             SELECT
                 w.C_BH AS case_id,
-                w.C_XFJ_BH AS source_xfj_bh,
+                w.C_XFJ_BH AS source_wtxx_bh,
                 w.LC_YJMS AS encrypted_description,
                 w.DT_CJSJ AS create_time,
                 w.DT_ZHXGSJ AS w_updated_at,
@@ -110,10 +137,51 @@ class MySQLService:
         params.append(limit)
         return query, params
 
+    def _build_source_fetch_query(
+        self,
+        limit: int,
+        last_case_id: Optional[str],
+    ):
+        source_table = self._validate_table_name(self._settings.mysql_source_table, "mysql_source_table")
+        query = """
+            SELECT
+                case_id,
+                source_wtxx_bh,
+                petition_id,
+                location,
+                encrypted_reported_persons,
+                encrypted_reporter,
+                encrypted_description,
+                create_time
+            FROM {source_table}
+            WHERE (%s IS NULL OR case_id > %s)
+            ORDER BY case_id ASC
+            LIMIT %s
+        """.format(source_table=source_table)
+        return query, [last_case_id, last_case_id, limit]
+
+    def _build_source_fetch_by_case_id_query(self, case_id: str):
+        source_table = self._validate_table_name(self._settings.mysql_source_table, "mysql_source_table")
+        query = """
+            SELECT
+                case_id,
+                source_wtxx_bh,
+                petition_id,
+                location,
+                encrypted_reported_persons,
+                encrypted_reporter,
+                encrypted_description,
+                create_time
+            FROM {source_table}
+            WHERE case_id = %s
+            LIMIT 1
+        """.format(source_table=source_table)
+        return query, [case_id]
+
     def _parse_joined_row(self, row: Any) -> JoinedSourceRow:
         return JoinedSourceRow(
             case_id=str(row["case_id"]),
-            source_xfj_bh=row.get("source_xfj_bh"),
+            source_wtxx_bh=row.get("source_wtxx_bh"),
             petition_id=row.get("petition_id"),
             encrypted_reported_persons=row.get("encrypted_reported_persons"),
             encrypted_reporter=row.get("encrypted_reporter"),
@@ -123,6 +191,18 @@ class MySQLService:
             w_updated_at=row.get("w_updated_at"),
             x_create_time=row.get("x_create_time"),
             x_updated_at=row.get("x_updated_at"),
+        )
+
+    def _parse_source_row(self, row: Any) -> SourceTableRow:
+        return SourceTableRow(
+            case_id=str(row["case_id"]),
+            source_wtxx_bh=row.get("source_wtxx_bh"),
+            petition_id=row.get("petition_id"),
+            encrypted_reported_persons=row.get("encrypted_reported_persons"),
+            encrypted_reporter=row.get("encrypted_reporter"),
+            encrypted_description=row.get("encrypted_description"),
+            location=row.get("location"),
+            create_time=row.get("create_time"),
         )
 
     def _validate_table_name(self, table_name: str, field_name: str) -> str:

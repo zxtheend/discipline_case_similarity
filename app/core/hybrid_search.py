@@ -39,11 +39,7 @@ def reciprocal_rank_fusion(
             setattr(current, score_field, getattr(candidate, score_field))
             current.hybrid_score += 1.0 / (k + rank)
 
-    query_persons = {item.strip() for item in request.reported_persons if item.strip()}
     for candidate in merged.values():
-        overlap = query_persons.intersection(candidate.reported_persons)
-        if overlap:
-            candidate.hybrid_score += min(0.08 * len(overlap), 0.24)
         if candidate.location == request.location:
             candidate.hybrid_score += 0.03
 
@@ -68,7 +64,7 @@ class HybridSearchEngine:
     async def search(self, request: IdentifyRequest) -> List[SearchCandidate]:
         query_text = build_query_text(request)
         query_embedding = await self._embedding_service.embed_text(query_text)
-        query_filter = build_case_filter(request.location, request.time_range_years)
+        query_filter = build_case_filter(request.reported_persons, request.time_range_years)
         dense_task = self._qdrant_service.search_dense(
             embedding=query_embedding,
             query_filter=query_filter,

@@ -1,5 +1,7 @@
 from typing import Any, Dict, List
 
+import httpx
+
 from app.errors import ServiceError
 from app.services.base_http import BaseHTTPService
 
@@ -10,12 +12,22 @@ class LLMService(BaseHTTPService):
             "model": self.model_name,
             "temperature": 0.1,
             "response_format": {"type": "json_object"},
+            "chat_template_kwargs": {"enable_thinking": False},
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
         }
-        response = await self._client.post("/chat/completions", json=payload)
+        try:
+            response = await self._client.post("/chat/completions", json=payload)
+        except httpx.TimeoutException as exc:
+            raise ServiceError(
+                error_code="llm_timeout",
+                message="LLM request timed out.",
+                status_code=504,
+                retryable=True,
+                details={"error": str(exc)},
+            ) from exc
         if response.is_error:
             raise ServiceError(
                 error_code="llm_failed",

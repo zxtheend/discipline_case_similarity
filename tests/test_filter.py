@@ -11,11 +11,11 @@ class FilterTests(unittest.TestCase):
         self.assertEqual(cutoff.year, 2021)
         self.assertEqual(cutoff.month, 3)
 
-    def test_build_case_filter_contains_location_and_time(self):
-        qdrant_filter = build_case_filter("太原市", 5)
+    def test_build_case_filter_contains_reported_persons_and_time(self):
+        qdrant_filter = build_case_filter([" 王建国 ", "李四", ""], 5)
         self.assertEqual(len(qdrant_filter.must), 2)
-        self.assertEqual(qdrant_filter.must[0].key, "location")
-        self.assertEqual(qdrant_filter.must[0].match.value, "太原市")
+        self.assertEqual(qdrant_filter.must[0].key, "reported_persons")
+        self.assertEqual(qdrant_filter.must[0].match.any, ["王建国", "李四"])
         self.assertEqual(qdrant_filter.must[1].key, "create_time")
 
 

@@ -18,6 +18,7 @@ class QdrantService:
             port=settings.qdrant_port,
             https=settings.qdrant_https,
             api_key=settings.qdrant_api_key or None,
+            timeout=settings.http_timeout_seconds,
             check_compatibility=False,
         )
 
@@ -155,7 +156,7 @@ class QdrantService:
         payload = point.payload or {}
         base_kwargs = {
             "case_id": str(payload.get("case_id", point.id)),
-            "location": payload.get("location", ""),
+            "location": payload.get("location"),
             "location_district": payload.get("location_district"),
             "reported_persons": payload.get("reported_persons") or [],
             "reporter": payload.get("reporter"),

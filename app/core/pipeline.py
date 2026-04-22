@@ -4,8 +4,8 @@ from app.config import Settings
 from app.core.hybrid_search import HybridSearchEngine
 from app.core.llm_judge import LLMJudgeEngine
 from app.core.rerank import RerankEngine
-from app.models.request import IdentifyRequest
-from app.models.response import IdentifyResponse
+from app.models.request import ClueMiningRequest, IdentifyRequest
+from app.models.response import ClueMiningResponse, IdentifyResponse, SimilarCase
 from app.utils.audit import AuditLogger
 
 
@@ -29,17 +29,15 @@ class IdentifyPipeline:
         hybrid_candidates = await self._hybrid_search_engine.search(request)
         if not hybrid_candidates:
             response = IdentifyResponse(
-                is_duplicate=False,
                 similar_cases=[],
-                new_clues=[],
                 processing_time_ms=int((perf_counter() - started) * 1000),
                 request_id=request_id,
             )
             self._audit_logger.log_event(
                 "identify_completed",
                 request_id=request_id,
-                is_duplicate=False,
                 similar_case_ids=[],
+                similar_case_count=0,
             )
             return response
 
@@ -47,22 +45,67 @@ class IdentifyPipeline:
             query=request.description,
             candidates=hybrid_candidates,
         )
-        duplicate_result, clue_result = await self._llm_judge_engine.judge(
-            request=request,
-            candidates=reranked_candidates,
-        )
         response = IdentifyResponse(
-            is_duplicate=duplicate_result.is_duplicate,
-            similar_cases=duplicate_result.ranked_cases[: self._settings.judge_top_n],
-            new_clues=clue_result.new_clues,
+            similar_cases=self._to_similar_cases(reranked_candidates),
             processing_time_ms=int((perf_counter() - started) * 1000),
             request_id=request_id,
         )
         self._audit_logger.log_event(
             "identify_completed",
             request_id=request_id,
-            is_duplicate=response.is_duplicate,
             similar_case_ids=[item.case_id for item in response.similar_cases],
+            similar_case_count=len(response.similar_cases),
+        )
+        return response
+
+    async def mine_clues(
+        self,
+        request: ClueMiningRequest,
+        request_id: str,
+    ) -> ClueMiningResponse:
+        started = perf_counter()
+        identify_request = IdentifyRequest(
+            reported_persons=request.reported_persons,
+            reporter=request.reporter,
+            location=request.location,
+            description=request.description,
+            time_range_years=request.time_range_years,
+        )
+        clue_result = await self._llm_judge_engine.mine_clues(
+            request=identify_request,
+            similar_cases=[SimilarCase(**item.model_dump()) for item in request.similar_cases],
+        )
+        response = ClueMiningResponse(
+            new_clues=clue_result.new_clues,
+            processing_time_ms=int((perf_counter() - started) * 1000),
+            request_id=request_id,
+        )
+        self._audit_logger.log_event(
+            "clue_mining_completed",
+            request_id=request_id,
+            similar_case_ids=[item.case_id for item in request.similar_cases],
             clue_count=len(response.new_clues),
         )
         return response
+
+    def _to_similar_cases(self, candidates):
+        similar_cases = []
+        for rank, candidate in enumerate(candidates[: self._settings.judge_top_n], start=1):
+            rerank_score = candidate.rerank_score or 0.0
+            similarity_score = max(0, min(100, int(round(rerank_score * 100))))
+            similar_cases.append(
+                SimilarCase(
+                    case_id=candidate.case_id,
+                    similarity_score=similarity_score,
+                    rank=rank,
+                    reason="Hybrid Search 与 rerank 综合排序结果。",
+                    location=candidate.location,
+                    location_district=candidate.location_district,
+                    reported_persons=candidate.reported_persons,
+                    reporter=candidate.reporter,
+                    description_text=candidate.description_text,
+                    create_time=candidate.create_time,
+                    updated_at=candidate.updated_at,
+                )
+            )
+        return similar_cases

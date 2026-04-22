@@ -8,13 +8,14 @@ def cutoff_datetime(years: int, now: datetime = None) -> datetime:
     return active_now - timedelta(days=365 * years)
 
 
-def build_case_filter(location: str, time_range_years: int) -> models.Filter:
+def build_case_filter(reported_persons: list[str], time_range_years: int) -> models.Filter:
     cutoff = cutoff_datetime(time_range_years)
+    normalized_persons = [item.strip() for item in reported_persons if item and item.strip()]
     return models.Filter(
         must=[
             models.FieldCondition(
-                key="location",
-                match=models.MatchValue(value=location),
+                key="reported_persons",
+                match=models.MatchAny(any=normalized_persons),
             ),
             models.FieldCondition(
                 key="create_time",

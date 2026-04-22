@@ -1,0 +1,13 @@
+services:
+  fastapi:
+    build:
+      network: ${DOCKER_BUILD_NETWORK:-host}
+      args:
+        HTTP_PROXY: ${DOCKER_BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${DOCKER_BUILD_HTTPS_PROXY:-}
+        ALL_PROXY: ${DOCKER_BUILD_ALL_PROXY:-}
+        NO_PROXY: ${DOCKER_BUILD_NO_PROXY:-localhost,127.0.0.1}
+        http_proxy: ${DOCKER_BUILD_HTTP_PROXY:-}
+        https_proxy: ${DOCKER_BUILD_HTTPS_PROXY:-}
+        all_proxy: ${DOCKER_BUILD_ALL_PROXY:-}
+        no_proxy: ${DOCKER_BUILD_NO_PROXY:-localhost,127.0.0.1}

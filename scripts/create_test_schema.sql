@@ -1,17 +1,15 @@
 CREATE TABLE IF NOT EXISTS case_similarity_source (
     case_id VARCHAR(64) NOT NULL PRIMARY KEY,
-    reported_persons_json JSON NOT NULL,
-    reporter VARCHAR(128) NULL,
+    source_wtxx_bh VARCHAR(64) NULL,
+    petition_id VARCHAR(64) NULL,
     location VARCHAR(128) NOT NULL,
-    location_district VARCHAR(128) NULL,
-    description_text TEXT NOT NULL,
+    encrypted_reported_persons TEXT NULL,
+    encrypted_reporter TEXT NULL,
+    encrypted_description LONGBLOB NULL,
     create_time DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL,
-    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
-    extra_json JSON NULL,
-    KEY idx_case_similarity_updated (updated_at, case_id),
-    KEY idx_case_similarity_location (location),
-    KEY idx_case_similarity_status (status)
+    KEY idx_case_similarity_source_wtxx (source_wtxx_bh),
+    KEY idx_case_similarity_petition (petition_id),
+    KEY idx_case_similarity_location (location)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS t_xf_xfj (

@@ -188,8 +188,8 @@ def build_duplicate_response(prompt: str) -> str:
 
 
 def build_clue_response(prompt: str) -> str:
-    new_case = extract_json_block(prompt, "新案件：", "候选案件：")
-    candidates = extract_json_block(prompt, "候选案件：", "输出格式：")
+    new_case = extract_json_block(prompt, "新案件：", "重复案件：")
+    candidates = extract_json_block(prompt, "重复案件：", "输出格式：")
     query = json.loads(new_case or "{}")
     candidate_items = json.loads(candidates or "[]")
     base_text = " ".join(query.get("reported_persons", [])) + " " + query.get("description", "")
@@ -206,6 +206,7 @@ def build_clue_response(prompt: str) -> str:
                 if keyword in candidate_text and keyword not in base_text:
                     clues.append(
                         {
+                            "source_case_id": item["case_id"],
                             "clue_type": clue_type,
                             "description": "历史案件 {0} 提到“{1}”相关情节，可作为延伸核查线索。".format(
                                 item["case_id"], keyword

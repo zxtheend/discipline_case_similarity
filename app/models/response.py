@@ -9,17 +9,29 @@ class SimilarCase(BaseModel):
     similarity_score: int = Field(ge=0, le=100)
     rank: int = Field(ge=1)
     reason: str
+    location: Optional[str] = None
+    location_district: Optional[str] = None
+    reported_persons: List[str] = Field(default_factory=list)
+    reporter: Optional[str] = None
+    description_text: Optional[str] = None
+    create_time: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class NewClue(BaseModel):
+    source_case_id: str
     clue_type: str
     description: str
     risk_level: str
 
 
 class IdentifyResponse(BaseModel):
-    is_duplicate: bool
     similar_cases: List[SimilarCase] = Field(default_factory=list)
+    processing_time_ms: int = Field(ge=0)
+    request_id: str
+
+
+class ClueMiningResponse(BaseModel):
     new_clues: List[NewClue] = Field(default_factory=list)
     processing_time_ms: int = Field(ge=0)
     request_id: str

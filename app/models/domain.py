@@ -20,7 +20,7 @@ class SourceCase(BaseModel):
     case_id: str
     reported_persons: List[str] = Field(default_factory=list)
     reporter: Optional[str] = None
-    location: str
+    location: Optional[str] = None
     location_district: Optional[str] = None
     description_text: str
     create_time: datetime
@@ -31,7 +31,7 @@ class SourceCase(BaseModel):
     @property
     def document_text(self) -> str:
         parts = [
-            "属地: {0}".format(self.location),
+            "属地: {0}".format(self.location or ""),
             "区县: {0}".format(self.location_district or ""),
             "举报人: {0}".format(self.reporter or ""),
             "被举报人: {0}".format("、".join(self.reported_persons)),
@@ -42,7 +42,7 @@ class SourceCase(BaseModel):
 
 class JoinedSourceRow(BaseModel):
     case_id: str
-    source_xfj_bh: Optional[str] = None
+    source_wtxx_bh: Optional[str] = None
     petition_id: Optional[str] = None
     encrypted_reported_persons: Any = None
     encrypted_reporter: Any = None
@@ -70,6 +70,21 @@ class JoinedSourceRow(BaseModel):
         return max(candidates)
 
 
+class SourceTableRow(BaseModel):
+    case_id: str
+    source_wtxx_bh: Optional[str] = None
+    petition_id: Optional[str] = None
+    encrypted_reported_persons: Any = None
+    encrypted_reporter: Any = None
+    encrypted_description: Any = None
+    location: Optional[str] = None
+    create_time: Optional[datetime] = None
+
+    @property
+    def updated_at(self) -> Optional[datetime]:
+        return self.create_time
+
+
 class RowDecryptionResult(BaseModel):
     case_id: str
     reported_persons_text: Optional[str] = None
@@ -80,7 +95,7 @@ class RowDecryptionResult(BaseModel):
 
 class SearchCandidate(BaseModel):
     case_id: str
-    location: str
+    location: Optional[str] = None
     location_district: Optional[str] = None
     reported_persons: List[str] = Field(default_factory=list)
     reporter: Optional[str] = None
@@ -97,7 +112,7 @@ class SearchCandidate(BaseModel):
     def rerank_document(self) -> str:
         parts = [
             "案件编号: {0}".format(self.case_id),
-            "属地: {0}".format(self.location),
+            "属地: {0}".format(self.location or ""),
             "区县: {0}".format(self.location_district or ""),
             "举报人: {0}".format(self.reporter or ""),
             "被举报人: {0}".format("、".join(self.reported_persons)),
