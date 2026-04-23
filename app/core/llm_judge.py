@@ -64,7 +64,7 @@ class LLMJudgeEngine:
             candidate_map,
         )
         if not duplicate_result.is_duplicate:
-            return duplicate_result, ClueMiningResult(new_clues=[])
+            return duplicate_result, ClueMiningResult()
 
         duplicate_candidates = [
             candidate_map[case.case_id]
@@ -72,7 +72,7 @@ class LLMJudgeEngine:
             if case.case_id in candidate_map
         ]
         if not duplicate_candidates:
-            return duplicate_result, ClueMiningResult(new_clues=[])
+            return duplicate_result, ClueMiningResult()
 
         clue_result = await self.mine_clues(
             request=request,
@@ -89,7 +89,7 @@ class LLMJudgeEngine:
         similar_cases: List[SimilarCase],
     ) -> ClueMiningResult:
         if not similar_cases:
-            return ClueMiningResult(new_clues=[])
+            return ClueMiningResult()
 
         new_case_json = self._new_case_payload_json(request)
         allowed_cases = similar_cases[: self._settings.judge_top_n]
@@ -119,8 +119,15 @@ class LLMJudgeEngine:
             )
 
         allowed_case_ids = {case.case_id for case in allowed_cases}
-        clue_result.new_clues = [
-            clue for clue in clue_result.new_clues if clue.source_case_id in allowed_case_ids
+        clue_result.incremental_clues = [
+            clue
+            for clue in clue_result.incremental_clues
+            if clue.source_case_id in allowed_case_ids
+        ]
+        clue_result.supplemental_clues = [
+            clue
+            for clue in clue_result.supplemental_clues
+            if clue.source_case_id in allowed_case_ids
         ]
         return clue_result
 
@@ -183,5 +190,4 @@ class LLMJudgeEngine:
             "description_text": similar_case.description_text or "",
             "similarity_score": similar_case.similarity_score,
             "rank": similar_case.rank,
-            "reason": similar_case.reason,
         }

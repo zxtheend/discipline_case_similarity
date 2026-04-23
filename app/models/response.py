@@ -8,7 +8,6 @@ class SimilarCase(BaseModel):
     case_id: str
     similarity_score: int = Field(ge=0, le=100)
     rank: int = Field(ge=1)
-    reason: str
     location: Optional[str] = None
     location_district: Optional[str] = None
     reported_persons: List[str] = Field(default_factory=list)
@@ -19,7 +18,9 @@ class SimilarCase(BaseModel):
 
 
 class NewClue(BaseModel):
-    source_case_id: str
+    source_case_id: str = Field(
+        description="Historical case identifier used as the comparison baseline for this clue."
+    )
     clue_type: str
     description: str
     risk_level: str
@@ -32,7 +33,8 @@ class IdentifyResponse(BaseModel):
 
 
 class ClueMiningResponse(BaseModel):
-    new_clues: List[NewClue] = Field(default_factory=list)
+    incremental_clues: List[NewClue] = Field(default_factory=list)
+    supplemental_clues: List[NewClue] = Field(default_factory=list)
     processing_time_ms: int = Field(ge=0)
     request_id: str
 

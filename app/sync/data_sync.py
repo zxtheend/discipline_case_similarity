@@ -131,16 +131,12 @@ class DataSyncService:
             if not rows:
                 break
 
-            upserted = 0
-            source_case_count = 0
-            for row in rows:
-                processed = await self._process_source_row(
-                    request_id=request_id,
-                    row=row,
-                    fail_fast=False,
-                )
-                source_case_count += processed
-                upserted += processed
+            upserted = await self._process_source_rows(
+                request_id=request_id,
+                rows=rows,
+                fail_fast=False,
+            )
+            source_case_count = upserted
 
             total_read += len(rows)
             total_upserted += upserted
@@ -212,6 +208,88 @@ class DataSyncService:
     async def _embed_rows(self, rows: List[SourceCase]) -> List[QueryEmbedding]:
         documents = [row.document_text for row in rows]
         return await self._embedding_service.embed_texts(documents)
+
+    async def _process_source_rows(
+        self,
+        request_id: str,
+        rows: Sequence[SourceTableRow],
+        fail_fast: bool,
+    ) -> int:
+        if not rows:
+            return 0
+
+        try:
+            decrypted_rows = await self._decrypt_provider.decrypt_rows(rows)
+            source_cases = self._map_source_rows_to_source_cases(
+                rows=rows,
+                decrypted_rows=decrypted_rows,
+                request_id=request_id,
+                fail_fast=fail_fast,
+            )
+            if not source_cases:
+                return 0
+
+            try:
+                embeddings = await self._embed_rows(source_cases)
+                return await self._qdrant_service.upsert_cases(source_cases, embeddings)
+            except ServiceError as exc:
+                if fail_fast or len(source_cases) == 1:
+                    raise
+
+                self._logger.warning(
+                    "sync_batch_fallback_to_row_mode",
+                    extra={
+                        "request_id": request_id,
+                        "batch_size": len(rows),
+                        "valid_source_cases": len(source_cases),
+                        "reason": exc.error_code or "batch_processing_failed",
+                        "details": exc.message,
+                    },
+                )
+                return await self._process_source_cases_individually(
+                    request_id=request_id,
+                    rows=rows,
+                    source_cases=source_cases,
+                    fail_fast=fail_fast,
+                )
+        except ServiceError as exc:
+            if fail_fast:
+                raise
+            if len(rows) == 1:
+                self._log_skipped_source_row(
+                    request_id=request_id,
+                    row=rows[0],
+                    reason=exc.error_code or "row_processing_failed",
+                    details=exc.message,
+                )
+                return 0
+            raise
+
+    async def _process_source_cases_individually(
+        self,
+        request_id: str,
+        rows: Sequence[SourceTableRow],
+        source_cases: Sequence[SourceCase],
+        fail_fast: bool,
+    ) -> int:
+        row_by_case_id = {row.case_id: row for row in rows}
+        upserted = 0
+        for source_case in source_cases:
+            try:
+                embeddings = await self._embed_rows([source_case])
+                upserted += await self._qdrant_service.upsert_cases([source_case], embeddings)
+            except ServiceError as exc:
+                if fail_fast:
+                    raise
+                row = row_by_case_id.get(source_case.case_id)
+                if row is not None:
+                    self._log_skipped_source_row(
+                        request_id=request_id,
+                        row=row,
+                        reason=exc.error_code or "row_processing_failed",
+                        details=exc.message,
+                    )
+        return upserted
 
     async def _process_source_row(
         self,

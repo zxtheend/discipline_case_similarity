@@ -73,18 +73,20 @@ class IdentifyPipeline:
         )
         clue_result = await self._llm_judge_engine.mine_clues(
             request=identify_request,
-            similar_cases=[SimilarCase(**item.model_dump()) for item in request.similar_cases],
+            similar_cases=[SimilarCase(**request.similar_case.model_dump())],
         )
         response = ClueMiningResponse(
-            new_clues=clue_result.new_clues,
+            incremental_clues=clue_result.incremental_clues,
+            supplemental_clues=clue_result.supplemental_clues,
             processing_time_ms=int((perf_counter() - started) * 1000),
             request_id=request_id,
         )
         self._audit_logger.log_event(
             "clue_mining_completed",
             request_id=request_id,
-            similar_case_ids=[item.case_id for item in request.similar_cases],
-            clue_count=len(response.new_clues),
+            similar_case_ids=[request.similar_case.case_id],
+            incremental_clue_count=len(response.incremental_clues),
+            supplemental_clue_count=len(response.supplemental_clues),
         )
         return response
 
@@ -98,7 +100,6 @@ class IdentifyPipeline:
                     case_id=candidate.case_id,
                     similarity_score=similarity_score,
                     rank=rank,
-                    reason="Hybrid Search 与 rerank 综合排序结果。",
                     location=candidate.location,
                     location_district=candidate.location_district,
                     reported_persons=candidate.reported_persons,

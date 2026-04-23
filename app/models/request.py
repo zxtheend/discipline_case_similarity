@@ -16,7 +16,6 @@ class ClueSimilarCaseRequest(BaseModel):
     case_id: str = Field(min_length=1)
     similarity_score: int = Field(ge=0, le=100)
     rank: int = Field(ge=1)
-    reason: str = Field(min_length=1)
     location: Optional[str] = None
     location_district: Optional[str] = None
     reported_persons: List[str] = Field(default_factory=list)
@@ -27,7 +26,7 @@ class ClueSimilarCaseRequest(BaseModel):
 
 
 class ClueMiningRequest(IdentifyRequest):
-    similar_cases: List[ClueSimilarCaseRequest] = Field(default_factory=list)
+    similar_case: ClueSimilarCaseRequest
 
 
 class RebuildRowRequest(BaseModel):

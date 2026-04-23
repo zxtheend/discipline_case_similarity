@@ -127,7 +127,8 @@ class DuplicateJudgeResult(BaseModel):
 
 
 class ClueMiningResult(BaseModel):
-    new_clues: List[NewClue] = Field(default_factory=list)
+    incremental_clues: List[NewClue] = Field(default_factory=list)
+    supplemental_clues: List[NewClue] = Field(default_factory=list)
 
 
 class SyncCursor(BaseModel):

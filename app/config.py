@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     rerank_model: str = "bge-reranker-v2-m3"
     model_api_key: Optional[str] = "EMPTY"
     http_timeout_seconds: float = 60.0
+    embedding_retry_attempts: int = 3
+    embedding_retry_backoff_seconds: float = 1.0
 
     mysql_host: str = "localhost"
     mysql_port: int = 3306

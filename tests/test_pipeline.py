@@ -62,8 +62,9 @@ class FakeAuditLogger:
 
 
 class FakeClueResult:
-    def __init__(self, new_clues):
-        self.new_clues = new_clues
+    def __init__(self, incremental_clues, supplemental_clues):
+        self.incremental_clues = incremental_clues
+        self.supplemental_clues = supplemental_clues
 
 
 class PipelineTests(unittest.IsolatedAsyncioTestCase):
@@ -86,7 +87,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
             updated_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
             rerank_score=0.87,
         )
-        llm_judge_engine = FakeLLMJudgeEngine(FakeClueResult([]))
+        llm_judge_engine = FakeLLMJudgeEngine(FakeClueResult([], []))
         audit_logger = FakeAuditLogger()
         pipeline = IdentifyPipeline(
             settings=self.settings,
@@ -114,17 +115,25 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(audit_logger.events[0]["event_type"], "identify_completed")
         self.assertEqual(audit_logger.events[0]["details"]["similar_case_count"], 1)
 
-    async def test_mine_clues_uses_client_supplied_similar_cases(self):
+    async def test_mine_clues_uses_client_supplied_similar_case(self):
         llm_judge_engine = FakeLLMJudgeEngine(
             FakeClueResult(
                 [
                     {
                         "source_case_id": "CASE-001",
                         "clue_type": "关系",
-                        "description": "亲属承揽工程",
+                        "description": "当前新案件新增提到亲属承揽工程，相对历史案件 CASE-001 可继续核查。",
                         "risk_level": "高",
                     }
-                ]
+                ],
+                [
+                    {
+                        "source_case_id": "CASE-001",
+                        "clue_type": "金额",
+                        "description": "历史案件 CASE-001 补充提到具体礼金金额，当前新案件未明确提到，可继续核查。",
+                        "risk_level": "高",
+                    }
+                ],
             )
         )
         audit_logger = FakeAuditLogger()
@@ -142,18 +151,15 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
                 reporter="张某",
                 location="太原市",
                 description="王建国收受礼金",
-                similar_cases=[
-                    {
-                        "case_id": "CASE-001",
-                        "similarity_score": 91,
-                        "rank": 1,
-                        "reason": "事实高度接近",
-                        "location": "太原市",
-                        "reported_persons": ["王建国"],
-                        "reporter": "李某",
-                        "description_text": "历史案件提到亲属承包工程。",
-                    }
-                ],
+                similar_case={
+                    "case_id": "CASE-001",
+                    "similarity_score": 91,
+                    "rank": 1,
+                    "location": "太原市",
+                    "reported_persons": ["王建国"],
+                    "reporter": "李某",
+                    "description_text": "历史案件提到亲属承包工程。",
+                },
             ),
             request_id="req-2",
         )
@@ -163,9 +169,11 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
             llm_judge_engine.mine_clues_calls[0]["similar_cases"][0].case_id,
             "CASE-001",
         )
-        self.assertEqual(response.new_clues[0].source_case_id, "CASE-001")
+        self.assertEqual(response.incremental_clues[0].source_case_id, "CASE-001")
+        self.assertEqual(response.supplemental_clues[0].source_case_id, "CASE-001")
         self.assertEqual(audit_logger.events[0]["event_type"], "clue_mining_completed")
-        self.assertEqual(audit_logger.events[0]["details"]["clue_count"], 1)
+        self.assertEqual(audit_logger.events[0]["details"]["incremental_clue_count"], 1)
+        self.assertEqual(audit_logger.events[0]["details"]["supplemental_clue_count"], 1)
 
 
 if __name__ == "__main__":

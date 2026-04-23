@@ -179,7 +179,7 @@ class SyncServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.batches, 1)
         self.assertEqual(result.cursor.last_case_id, "CASE-002")
         self.assertEqual(mysql_service.calls, [(8, None), (8, "CASE-002")])
-        self.assertEqual(decrypt_provider.calls, [["CASE-001"], ["CASE-002"]])
+        self.assertEqual(decrypt_provider.calls, [["CASE-001", "CASE-002"]])
         self.assertEqual(len(qdrant_service.upsert_calls), 1)
         upserted_cases, _ = qdrant_service.upsert_calls[0]
         self.assertEqual(len(upserted_cases), 1)
@@ -259,9 +259,14 @@ class SyncServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(qdrant_service.upsert_calls), 1)
         upserted_cases, _ = qdrant_service.upsert_calls[0]
         self.assertEqual([case.case_id for case in upserted_cases], ["CASE-101"])
+        self.assertEqual(decrypt_provider.calls, [["CASE-101", "CASE-102"]])
         self.assertEqual(
             embedding_service.calls,
-            [[normal_case.document_text], [service_case.document_text]],
+            [
+                [normal_case.document_text, service_case.document_text],
+                [normal_case.document_text],
+                [service_case.document_text],
+            ],
         )
 
     async def test_map_source_rows_to_source_cases_allows_missing_location_but_skips_missing_description(self):

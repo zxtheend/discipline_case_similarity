@@ -11,9 +11,27 @@ class SuppressSuccessfulEmbeddingsFilter(logging.Filter):
         message = record.getMessage()
         if "HTTP Request:" not in message:
             return True
-        if "/embeddings" not in message:
-            return True
-        return " 200 OK" not in message and '"200 OK"' not in message
+        return not _is_successful_httpx_request(message)
+
+
+def _is_successful_httpx_request(message: str) -> bool:
+    success_markers = (
+        " 200 OK",
+        '"200 OK"',
+        " 201 Created",
+        '"201 Created"',
+        " 202 Accepted",
+        '"202 Accepted"',
+        " 204 No Content",
+        '"204 No Content"',
+        " 301 Moved Permanently",
+        '"301 Moved Permanently"',
+        " 302 Found",
+        '"302 Found"',
+        " 304 Not Modified",
+        '"304 Not Modified"',
+    )
+    return any(marker in message for marker in success_markers)
 
 
 class JsonFormatter(logging.Formatter):

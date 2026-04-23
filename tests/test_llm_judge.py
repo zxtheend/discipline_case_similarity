@@ -4,6 +4,7 @@ from app.config import Settings
 from app.core.llm_judge import LLMJudgeEngine
 from app.models.domain import SearchCandidate
 from app.models.request import IdentifyRequest
+from app.models.response import SimilarCase
 
 
 class FakeLLMService:
@@ -22,6 +23,44 @@ class FakeLLMService:
 
 
 class LLMJudgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_mine_clues_prompt_marks_historical_case_as_reference(self):
+        settings = Settings(
+            prompt_dir="prompts",
+            state_dir="data/app_state",
+        )
+        llm_service = FakeLLMService(
+            [
+                '{"incremental_clues": [{"source_case_id": "CASE-001", "clue_type": "关系", "description": "当前新案件新增提到亲属承包工程，相对历史案件 CASE-001 可继续核查。", "risk_level": "高"}], "supplemental_clues": [{"source_case_id": "CASE-001", "clue_type": "金额", "description": "历史案件 CASE-001 补充提到具体礼金金额，当前新案件未明确提到，可继续核查。", "risk_level": "高"}]}'
+            ]
+        )
+        engine = LLMJudgeEngine(settings=settings, llm_service=llm_service)
+        request = IdentifyRequest(
+            reported_persons=["王建国"],
+            reporter="张某",
+            location="太原市",
+            description="王建国收受礼金，并新增提到姐姐名下公司承包围挡工程。",
+        )
+
+        await engine.mine_clues(
+            request=request,
+            similar_cases=[
+                SimilarCase(
+                    case_id="CASE-001",
+                    similarity_score=91,
+                    rank=1,
+                    location="太原市",
+                    reported_persons=["王建国"],
+                    reporter="李某",
+                    description_text="历史案件提到王建国收受礼金。",
+                )
+            ],
+        )
+
+        self.assertEqual(len(llm_service.calls), 1)
+        self.assertIn("当前新案件相对历史案件新增的可延伸核查点", llm_service.calls[0]["user_prompt"])
+        self.assertIn("历史案件中已有、但当前新案件未明确提到", llm_service.calls[0]["user_prompt"])
+        self.assertIn("source_case_id", llm_service.calls[0]["user_prompt"])
+
     async def test_judge_filters_unknown_case_ids(self):
         settings = Settings(
             prompt_dir="prompts",
@@ -30,7 +69,7 @@ class LLMJudgeTests(unittest.IsolatedAsyncioTestCase):
         llm_service = FakeLLMService(
             [
                 '{"is_duplicate": true, "ranked_cases": [{"case_id": "CASE-001", "similarity_score": 91, "rank": 1, "reason": "事实重合"}, {"case_id": "UNKNOWN", "similarity_score": 99, "rank": 2, "reason": "无效"}]}',
-                '{"new_clues": [{"source_case_id": "CASE-001", "clue_type": "关系", "description": "亲属承包工程", "risk_level": "高"}]}',
+                '{"incremental_clues": [{"source_case_id": "CASE-001", "clue_type": "关系", "description": "当前新案件新增提到亲属承包工程，相对历史案件 CASE-001 可继续核查。", "risk_level": "高"}], "supplemental_clues": [{"source_case_id": "CASE-001", "clue_type": "金额", "description": "历史案件 CASE-001 补充提到具体礼金金额，当前新案件未明确提到，可继续核查。", "risk_level": "高"}]}',
             ]
         )
         engine = LLMJudgeEngine(settings=settings, llm_service=llm_service)
@@ -55,8 +94,9 @@ class LLMJudgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(duplicate_result.is_duplicate)
         self.assertEqual(len(duplicate_result.ranked_cases), 1)
         self.assertEqual(duplicate_result.ranked_cases[0].case_id, "CASE-001")
-        self.assertEqual(clue_result.new_clues[0].source_case_id, "CASE-001")
-        self.assertEqual(clue_result.new_clues[0].risk_level, "高")
+        self.assertEqual(clue_result.incremental_clues[0].source_case_id, "CASE-001")
+        self.assertEqual(clue_result.incremental_clues[0].risk_level, "高")
+        self.assertEqual(clue_result.supplemental_clues[0].source_case_id, "CASE-001")
         self.assertEqual(len(llm_service.calls), 2)
         self.assertIn("重复案件：", llm_service.calls[1]["user_prompt"])
         self.assertNotIn("UNKNOWN", llm_service.calls[1]["user_prompt"])
@@ -91,7 +131,8 @@ class LLMJudgeTests(unittest.IsolatedAsyncioTestCase):
         duplicate_result, clue_result = await engine.judge(request, candidates)
 
         self.assertFalse(duplicate_result.is_duplicate)
-        self.assertEqual(clue_result.new_clues, [])
+        self.assertEqual(clue_result.incremental_clues, [])
+        self.assertEqual(clue_result.supplemental_clues, [])
         self.assertEqual(len(llm_service.calls), 1)
 
     async def test_judge_discards_clues_with_invalid_source_case_id(self):
@@ -102,7 +143,7 @@ class LLMJudgeTests(unittest.IsolatedAsyncioTestCase):
         llm_service = FakeLLMService(
             [
                 '{"is_duplicate": true, "ranked_cases": [{"case_id": "CASE-001", "similarity_score": 91, "rank": 1, "reason": "事实重合"}]}',
-                '{"new_clues": [{"source_case_id": "CASE-001", "clue_type": "关系", "description": "亲属承包工程", "risk_level": "高"}, {"source_case_id": "CASE-999", "clue_type": "金额", "description": "收受现金", "risk_level": "高"}]}',
+                '{"incremental_clues": [{"source_case_id": "CASE-001", "clue_type": "关系", "description": "当前新案件新增提到亲属承包工程，相对历史案件 CASE-001 可继续核查。", "risk_level": "高"}, {"source_case_id": "CASE-999", "clue_type": "金额", "description": "当前新案件新增提到收受现金，相对历史案件 CASE-999 可继续核查。", "risk_level": "高"}], "supplemental_clues": [{"source_case_id": "CASE-001", "clue_type": "金额", "description": "历史案件 CASE-001 补充提到礼金流水，当前新案件未明确提到，可继续核查。", "risk_level": "高"}, {"source_case_id": "CASE-999", "clue_type": "人物", "description": "历史案件 CASE-999 补充提到中间人，当前新案件未明确提到，可继续核查。", "risk_level": "中"}]}',
             ]
         )
         engine = LLMJudgeEngine(settings=settings, llm_service=llm_service)
@@ -132,8 +173,10 @@ class LLMJudgeTests(unittest.IsolatedAsyncioTestCase):
         duplicate_result, clue_result = await engine.judge(request, candidates)
 
         self.assertTrue(duplicate_result.is_duplicate)
-        self.assertEqual(len(clue_result.new_clues), 1)
-        self.assertEqual(clue_result.new_clues[0].source_case_id, "CASE-001")
+        self.assertEqual(len(clue_result.incremental_clues), 1)
+        self.assertEqual(clue_result.incremental_clues[0].source_case_id, "CASE-001")
+        self.assertEqual(len(clue_result.supplemental_clues), 1)
+        self.assertEqual(clue_result.supplemental_clues[0].source_case_id, "CASE-001")
 
 
 if __name__ == "__main__":

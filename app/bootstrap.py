@@ -29,6 +29,8 @@ async def build_container(settings: Optional[Settings] = None) -> ApplicationCon
         model_name=active_settings.embedding_model,
         api_key=active_settings.model_api_key,
         timeout_seconds=active_settings.http_timeout_seconds,
+        retry_attempts=active_settings.embedding_retry_attempts,
+        retry_backoff_seconds=active_settings.embedding_retry_backoff_seconds,
     )
     rerank_service = RerankService(
         base_url=active_settings.rerank_base_url,

@@ -1,5 +1,8 @@
+import asyncio
 from collections.abc import Iterable
 from typing import Any, Dict, List
+
+import httpx
 
 from app.errors import ServiceError
 from app.models.domain import QueryEmbedding, SparseEmbedding
@@ -7,6 +10,24 @@ from app.services.base_http import BaseHTTPService
 
 
 class EmbeddingService(BaseHTTPService):
+    def __init__(
+        self,
+        base_url: str,
+        model_name: str,
+        api_key: str | None,
+        timeout_seconds: float,
+        retry_attempts: int = 3,
+        retry_backoff_seconds: float = 1.0,
+    ) -> None:
+        super().__init__(
+            base_url=base_url,
+            model_name=model_name,
+            api_key=api_key,
+            timeout_seconds=timeout_seconds,
+        )
+        self._retry_attempts = max(1, retry_attempts)
+        self._retry_backoff_seconds = max(0.0, retry_backoff_seconds)
+
     async def embed_text(self, text: str) -> QueryEmbedding:
         embeddings = await self.embed_texts([text])
         return embeddings[0]
@@ -17,7 +38,7 @@ class EmbeddingService(BaseHTTPService):
             "input": texts,
             "encoding_format": "float",
         }
-        response = await self._client.post("/embeddings", json=payload)
+        response = await self._post_embeddings(payload)
         if response.is_error:
             raise ServiceError(
                 error_code="embedding_failed",
@@ -34,6 +55,34 @@ class EmbeddingService(BaseHTTPService):
                 retryable=True,
             )
         return [self._parse_embedding_item(item) for item in data]
+
+    async def _post_embeddings(self, payload: Dict[str, Any]) -> httpx.Response:
+        last_error: ServiceError | None = None
+        for attempt in range(1, self._retry_attempts + 1):
+            try:
+                return await self._client.post("/embeddings", json=payload)
+            except httpx.TimeoutException as exc:
+                last_error = ServiceError(
+                    error_code="embedding_timeout",
+                    message="Embedding request timed out.",
+                    status_code=504,
+                    retryable=True,
+                    details={"error": str(exc), "attempt": attempt},
+                )
+            except httpx.HTTPError as exc:
+                last_error = ServiceError(
+                    error_code="embedding_transport_error",
+                    message="Embedding transport failed: {0}".format(str(exc)),
+                    status_code=502,
+                    retryable=True,
+                    details={"error": str(exc), "attempt": attempt},
+                )
+
+            if attempt < self._retry_attempts and self._retry_backoff_seconds > 0:
+                await asyncio.sleep(self._retry_backoff_seconds * attempt)
+
+        assert last_error is not None
+        raise last_error
 
     def _parse_embedding_item(self, item: Dict[str, Any]) -> QueryEmbedding:
         dense_vector = item.get("embedding")

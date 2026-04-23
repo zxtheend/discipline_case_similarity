@@ -8,7 +8,7 @@
 
 - 快速判断当前案件是否与历史案件重复
 - 找出最相似的历史案件并给出理由
-- 从历史案件中提取可供延伸核查的新线索
+- 对比历史案件，识别当前新案件新增的可供延伸核查的新线索
 - 整体方案可在内网单机环境部署运行
 
 当前确认的生产数据链路为：
@@ -42,8 +42,10 @@
   - Phase 2：Hybrid Search（dense + sparse）+ RRF
   - Phase 3：Rerank
 - 新线索挖掘接口已实现：
-  - 客户端提交新案件与 `similar_cases`
-  - LLM 输出结构化 `new_clues`
+  - 客户端提交新案件与用户选中的 `similar_case`
+  - LLM 输出结构化 `incremental_clues` 与 `supplemental_clues`
+  - `incremental_clues` 表达当前新案件相对历史案件新增的延伸核查点
+  - `supplemental_clues` 表达历史案件中已有、但当前新案件未明确提到、仍值得核查的补充线索
 - MySQL -> Qdrant 同步已实现：
   - 已切换为读取标准源表 `case_similarity_source`
   - 应用内解密并映射到统一 `SourceCase`
@@ -144,7 +146,7 @@ flowchart LR
 5. 用 RRF 融合得到候选集
 6. 用 rerank 模型收敛候选顺序
 7. 返回结构化相似案件结果
-8. 如需新线索，再调用独立 `clues` 接口
+8. 如需新线索，再调用独立 `clues` 接口，对比用户选中的历史案件识别当前新案件新增信息
 
 ### 4.3 同步链路
 
@@ -182,7 +184,6 @@ flowchart LR
       "case_id": "CASE-0001",
       "similarity_score": 91,
       "rank": 1,
-      "reason": "Hybrid Search 与 rerank 综合排序结果。",
       "location": "太原市",
       "reported_persons": ["王建国"],
       "reporter": "李四",
@@ -205,18 +206,15 @@ flowchart LR
   "location": "太原市",
   "description": "反映王建国在城改项目中收受礼金并指定亲属承包附属工程",
   "time_range_years": 5,
-  "similar_cases": [
-    {
-      "case_id": "CASE-0001",
-      "similarity_score": 91,
-      "rank": 1,
-      "reason": "Hybrid Search 与 rerank 综合排序结果。",
-      "location": "太原市",
-      "reported_persons": ["王建国"],
-      "reporter": "李四",
-      "description_text": "历史案件提到王建国通过亲属承揽附属工程。"
-    }
-  ]
+  "similar_case": {
+    "case_id": "CASE-0001",
+    "similarity_score": 91,
+    "rank": 1,
+    "location": "太原市",
+    "reported_persons": ["王建国"],
+    "reporter": "李四",
+    "description_text": "历史案件提到王建国通过亲属承揽附属工程。"
+  }
 }
 ```
 
@@ -224,11 +222,19 @@ flowchart LR
 
 ```json
 {
-  "new_clues": [
+  "incremental_clues": [
     {
       "source_case_id": "CASE-0001",
       "clue_type": "关系",
-      "description": "历史案件 CASE-0001 提到被举报人通过亲属承揽附属工程，可作为延伸核查线索。",
+      "description": "当前新案件新增提到被举报人姐姐名下公司参与附属工程，相对历史案件 CASE-0001 可继续核查。",
+      "risk_level": "高"
+    }
+  ],
+  "supplemental_clues": [
+    {
+      "source_case_id": "CASE-0001",
+      "clue_type": "金额",
+      "description": "历史案件 CASE-0001 补充提到收受礼金金额，当前新案件未明确提到，可继续核查资金往来。",
       "risk_level": "高"
     }
   ],
@@ -236,6 +242,12 @@ flowchart LR
   "request_id": "xxxx"
 }
 ```
+
+说明：
+
+- `source_case_id` 表示本次新线索挖掘所参照的历史案件编号
+- `incremental_clues` 表示当前新案件相对该历史案件新增、且值得继续核查的信息
+- `supplemental_clues` 表示历史案件中已有、但当前新案件未明确提到、且值得继续核查的信息
 
 #### `POST /api/v1/admin/sync/incremental`
 
@@ -286,7 +298,7 @@ flowchart LR
 - `app/core/rerank.py`
   - 使用 rerank 服务重新排序候选集
 - `app/core/llm_judge.py`
-  - 输出新线索提取结果
+  - 输出“当前新案件相对历史案件新增”的新线索提取结果
 
 #### 服务层
 
@@ -500,7 +512,7 @@ MYSQL_PORT=3306
 1. 先确认宿主机三个 vLLM 服务已启动
 2. 再执行 `docker compose up -d --build`
 3. 确认 `156.5.32.67:3306` 可访问
-4. 进入 `seed -> full_sync -> identify -> clues` 联调
+4. 进入 `seed -> full_sync -> identify -> clues` 联调，验证当前新案件增量线索识别
 
 宿主机检查：
 
@@ -594,18 +606,15 @@ curl -X POST http://127.0.0.1:8000/api/v1/clues \
     "location": "太原市",
     "description": "反映王建国在城改项目中收受礼金并指定亲属承包附属工程",
     "time_range_years": 5,
-    "similar_cases": [
-      {
-        "case_id": "CASE-0001",
-        "similarity_score": 91,
-        "rank": 1,
-        "reason": "Hybrid Search 与 rerank 综合排序结果。",
-        "location": "太原市",
-        "reported_persons": ["王建国"],
-        "reporter": "李四",
-        "description_text": "历史案件提到王建国通过亲属承揽附属工程。"
-      }
-    ]
+    "similar_case": {
+      "case_id": "CASE-0001",
+      "similarity_score": 91,
+      "rank": 1,
+      "location": "太原市",
+      "reported_persons": ["王建国"],
+      "reporter": "李四",
+      "description_text": "历史案件提到王建国通过亲属承揽附属工程。"
+    }
   }'
 ```
 
@@ -620,9 +629,11 @@ curl -X POST http://127.0.0.1:8000/api/v1/clues \
 7. 调用 `POST /api/v1/identify`
 8. 如需验证新线索，再调用 `POST /api/v1/clues`
 9. 检查：
-   - `similar_cases` 是否非空
+   - `similar_case` 是否完整
    - `processing_time_ms` 是否合理
-   - `new_clues` 是否能正常返回或为空但结构合法
+   - `incremental_clues` 与 `supplemental_clues` 是否能正常返回或为空但结构合法
+   - `incremental_clues` 是否体现“当前新案件相对历史案件新增”的核查点
+   - `supplemental_clues` 是否体现“历史案件补充提供、当前新案件未明确提到”的核查点
 
 ## 7. 测试与验收
 
@@ -716,7 +727,7 @@ python3 scripts/evaluate_ranking.py --limit 2
 - 正样本 `identify` 命中验证已完成
 - 已提供固定样例驱动的排序系统化评测脚本与清单
 - 新线索独立接口链路已通，但尚未拿到稳定有效的业务样本结果
-- 当前 `new_clues` 已支持返回来源案件 `source_case_id`
+- 当前 `incremental_clues` 与 `supplemental_clues` 均支持返回参照历史案件编号 `source_case_id`
 
 ## 8. 目录结构
 

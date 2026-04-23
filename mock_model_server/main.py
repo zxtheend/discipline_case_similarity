@@ -192,35 +192,72 @@ def build_clue_response(prompt: str) -> str:
     candidates = extract_json_block(prompt, "重复案件：", "输出格式：")
     query = json.loads(new_case or "{}")
     candidate_items = json.loads(candidates or "[]")
-    base_text = " ".join(query.get("reported_persons", [])) + " " + query.get("description", "")
-    clues = []
+    new_case_text = " ".join(
+        [
+            " ".join(query.get("reported_persons", [])),
+            query.get("reporter") or "",
+            query.get("location") or "",
+            query.get("description", ""),
+        ]
+    )
+    incremental_clues = []
+    supplemental_clues = []
 
     for item in candidate_items:
         if item.get("location") != query.get("location"):
             continue
         if not set(query.get("reported_persons", [])).intersection(set(item.get("reported_persons", []))):
             continue
-        candidate_text = item.get("description_text", "")
+        historical_text = " ".join(
+            [
+                " ".join(item.get("reported_persons", [])),
+                item.get("reporter") or "",
+                item.get("location") or "",
+                item.get("description_text", ""),
+            ]
+        )
         for clue_type, keywords in CLUE_KEYWORDS.items():
             for keyword in keywords:
-                if keyword in candidate_text and keyword not in base_text:
-                    clues.append(
+                if keyword in new_case_text and keyword not in historical_text:
+                    incremental_clues.append(
                         {
                             "source_case_id": item["case_id"],
                             "clue_type": clue_type,
-                            "description": "历史案件 {0} 提到“{1}”相关情节，可作为延伸核查线索。".format(
+                            "description": "当前新案件新增提到“{1}”相关情节，相对历史案件 {0} 可继续核查。".format(
                                 item["case_id"], keyword
                             ),
                             "risk_level": "高" if clue_type in {"金额", "关系", "行为"} else "中",
                         }
                     )
                     break
-            if len(clues) >= 3:
+            if len(incremental_clues) >= 3:
                 break
-        if len(clues) >= 3:
+        for clue_type, keywords in CLUE_KEYWORDS.items():
+            for keyword in keywords:
+                if keyword in historical_text and keyword not in new_case_text:
+                    supplemental_clues.append(
+                        {
+                            "source_case_id": item["case_id"],
+                            "clue_type": clue_type,
+                            "description": "历史案件 {0} 补充提到“{1}”相关情节，当前新案件未明确提到，可继续核查。".format(
+                                item["case_id"], keyword
+                            ),
+                            "risk_level": "高" if clue_type in {"金额", "关系", "行为"} else "中",
+                        }
+                    )
+                    break
+            if len(supplemental_clues) >= 3:
+                break
+        if len(incremental_clues) >= 3 and len(supplemental_clues) >= 3:
             break
 
-    return json.dumps({"new_clues": clues[:3]}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "incremental_clues": incremental_clues[:3],
+            "supplemental_clues": supplemental_clues[:3],
+        },
+        ensure_ascii=False,
+    )
 
 
 def extract_json_block(text: str, start_label: str, end_label: str) -> str:

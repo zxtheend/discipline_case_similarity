@@ -34,13 +34,26 @@ class LoggerFilterTests(unittest.TestCase):
 
         self.assertTrue(self.filter.filter(record))
 
-    def test_filter_keeps_non_embeddings_requests(self):
+    def test_filter_suppresses_successful_non_embeddings_requests(self):
         record = logging.LogRecord(
             name="httpx",
             level=logging.INFO,
             pathname=__file__,
             lineno=1,
             msg='HTTP Request: DELETE http://qdrant:6333/collections/xinfang_cases "HTTP/1.1 200 OK"',
+            args=(),
+            exc_info=None,
+        )
+
+        self.assertFalse(self.filter.filter(record))
+
+    def test_filter_keeps_failed_non_embeddings_requests(self):
+        record = logging.LogRecord(
+            name="httpx",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='HTTP Request: POST http://qdrant:6333/collections/xinfang_cases/points "HTTP/1.1 500 Internal Server Error"',
             args=(),
             exc_info=None,
         )
