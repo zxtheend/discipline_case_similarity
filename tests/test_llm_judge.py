@@ -60,6 +60,11 @@ class LLMJudgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("当前新案件相对历史案件新增的可延伸核查点", llm_service.calls[0]["user_prompt"])
         self.assertIn("历史案件中已有、但当前新案件未明确提到", llm_service.calls[0]["user_prompt"])
         self.assertIn("source_case_id", llm_service.calls[0]["user_prompt"])
+        self.assertNotIn("start_time", llm_service.calls[0]["user_prompt"])
+        self.assertNotIn("end_time", llm_service.calls[0]["user_prompt"])
+        self.assertNotIn("similarity_score", llm_service.calls[0]["user_prompt"])
+        self.assertNotIn("rank", llm_service.calls[0]["user_prompt"])
+        self.assertNotIn("location_district", llm_service.calls[0]["user_prompt"])
 
     async def test_judge_filters_unknown_case_ids(self):
         settings = Settings(

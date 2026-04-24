@@ -31,7 +31,8 @@ class RankingEvaluationTests(unittest.TestCase):
                       "reporter": "张某",
                       "location": "太原市",
                       "description": "测试描述",
-                      "time_range_years": 5
+                      "start_time": "2021-01-01T00:00:00+00:00",
+                      "end_time": "2026-12-31T23:59:59+00:00"
                     },
                     "expected_top1": "CASE-0001",
                     "expected_in_top3": [],

@@ -69,11 +69,20 @@ class IdentifyPipeline:
             reporter=request.reporter,
             location=request.location,
             description=request.description,
-            time_range_years=request.time_range_years,
         )
         clue_result = await self._llm_judge_engine.mine_clues(
             request=identify_request,
-            similar_cases=[SimilarCase(**request.similar_case.model_dump())],
+            similar_cases=[
+                SimilarCase(
+                    case_id=request.similar_case.case_id,
+                    similarity_score=0,
+                    rank=1,
+                    location=request.similar_case.location,
+                    reported_persons=request.similar_case.reported_persons,
+                    reporter=request.similar_case.reporter,
+                    description_text=request.similar_case.description_text,
+                )
+            ],
         )
         response = ClueMiningResponse(
             incremental_clues=clue_result.incremental_clues,

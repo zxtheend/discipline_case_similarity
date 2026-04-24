@@ -153,8 +153,6 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
                 description="王建国收受礼金",
                 similar_case={
                     "case_id": "CASE-001",
-                    "similarity_score": 91,
-                    "rank": 1,
                     "location": "太原市",
                     "reported_persons": ["王建国"],
                     "reporter": "李某",
@@ -165,9 +163,14 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(len(llm_judge_engine.mine_clues_calls), 1)
+        self.assertEqual(llm_judge_engine.mine_clues_calls[0]["request"].reporter, "张某")
         self.assertEqual(
             llm_judge_engine.mine_clues_calls[0]["similar_cases"][0].case_id,
             "CASE-001",
+        )
+        self.assertEqual(
+            llm_judge_engine.mine_clues_calls[0]["similar_cases"][0].reporter,
+            "李某",
         )
         self.assertEqual(response.incremental_clues[0].source_case_id, "CASE-001")
         self.assertEqual(response.supplemental_clues[0].source_case_id, "CASE-001")

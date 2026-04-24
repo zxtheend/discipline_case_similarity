@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 import re
 from typing import Any, List, Optional, Protocol, Sequence
@@ -17,6 +19,7 @@ class DecryptProvider(Protocol):
 
 class NoopDecryptProvider:
     _hex_pattern = re.compile(r"^[0-9A-Fa-f]+$")
+    _base64_pattern = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 
     async def decrypt_rows(
         self,
@@ -47,11 +50,58 @@ class NoopDecryptProvider:
         if normalized is None:
             return None
 
+        base64_decoded = self._decode_base64_wrapped_value(normalized)
+        if base64_decoded is not None:
+            return self._normalize_text_value(base64_decoded)
+
+        return self._normalize_text_value(normalized)
+
+    def _normalize_text_value(self, value: str) -> Optional[str]:
+        normalized = value.strip() or None
+        if normalized is None:
+            return None
+
         decrypted_json = self._decrypt_json_value(normalized)
         if decrypted_json is not None:
             return decrypted_json
 
         return self._decode_hex_cipher_text(normalized)
+
+    def _decode_base64_wrapped_value(self, value: str) -> Optional[str]:
+        candidate = value.strip()
+        if len(candidate) < 8 or len(candidate) % 4 != 0:
+            return None
+        if not self._base64_pattern.fullmatch(candidate):
+            return None
+
+        try:
+            decoded = base64.b64decode(candidate, validate=True)
+        except (binascii.Error, ValueError):
+            return None
+
+        if not decoded:
+            return None
+        try:
+            decoded_text = decoded.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return None
+        if not decoded_text or decoded_text == candidate:
+            return None
+
+        if self._looks_like_encrypted_payload(decoded_text):
+            return decoded_text
+        return None
+
+    def _looks_like_encrypted_payload(self, value: str) -> bool:
+        stripped = value.strip()
+        if not stripped:
+            return False
+        if stripped.startswith(("{", "[")):
+            return True
+        compact = "".join(stripped.split())
+        if len(compact) >= 4 and len(compact) % 2 == 0 and self._hex_pattern.fullmatch(compact):
+            return True
+        return False
 
     def _decrypt_json_value(self, value: str) -> Optional[str]:
         try:

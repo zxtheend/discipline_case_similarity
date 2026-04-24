@@ -64,7 +64,11 @@ class HybridSearchEngine:
     async def search(self, request: IdentifyRequest) -> List[SearchCandidate]:
         query_text = build_query_text(request)
         query_embedding = await self._embedding_service.embed_text(query_text)
-        query_filter = build_case_filter(request.reported_persons, request.time_range_years)
+        query_filter = build_case_filter(
+            request.reported_persons,
+            request.start_time,
+            request.end_time,
+        )
         dense_task = self._qdrant_service.search_dense(
             embedding=query_embedding,
             query_filter=query_filter,

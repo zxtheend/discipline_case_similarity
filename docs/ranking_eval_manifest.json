@@ -7,7 +7,8 @@
       "reporter": "项目知情人",
       "location": "太原市",
       "description": "反映王建国在城改配套工程里收老板礼金，还指定亲戚承包附属工程。",
-      "time_range_years": 5
+      "start_time": "2021-01-01T00:00:00+00:00",
+      "end_time": "2026-12-31T23:59:59+00:00"
     },
     "expected_top1": null,
     "expected_in_top3": ["CASE-0001", "CASE-0002"],
@@ -23,7 +24,8 @@
       "reporter": "学生家长",
       "location": "大同市",
       "description": "举报赵志强在校服采购中指定供应商、收回扣。",
-      "time_range_years": 5
+      "start_time": "2021-01-01T00:00:00+00:00",
+      "end_time": "2026-12-31T23:59:59+00:00"
     },
     "expected_top1": null,
     "expected_in_top3": ["CASE-0006", "CASE-0007"],
@@ -39,7 +41,8 @@
       "reporter": "村民代表",
       "location": "朔州市",
       "description": "反映张明亮在征地补偿审核中偏向关系户，多发补偿款。",
-      "time_range_years": 5
+      "start_time": "2021-01-01T00:00:00+00:00",
+      "end_time": "2026-12-31T23:59:59+00:00"
     },
     "expected_top1": "CASE-0021",
     "expected_in_top3": ["CASE-0020"],
@@ -55,7 +58,8 @@
       "reporter": "工地人员",
       "location": "太原市",
       "description": "有人说老王在城改工地拿了老板红包，还点名让亲戚接活。",
-      "time_range_years": 5
+      "start_time": "2021-01-01T00:00:00+00:00",
+      "end_time": "2026-12-31T23:59:59+00:00"
     },
     "expected_top1": null,
     "expected_in_top3": ["CASE-0001", "CASE-0002"],
@@ -71,7 +75,8 @@
       "reporter": "企业员工",
       "location": "长治市",
       "description": "反映潞安集团在设备采购里指定品牌，还收了回扣。",
-      "time_range_years": 5
+      "start_time": "2021-01-01T00:00:00+00:00",
+      "end_time": "2026-12-31T23:59:59+00:00"
     },
     "expected_top1": "CASE-0029",
     "expected_in_top3": [],

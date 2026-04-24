@@ -138,7 +138,6 @@ class LLMJudgeEngine:
                 "reporter": request.reporter,
                 "location": request.location,
                 "description": request.description,
-                "time_range_years": request.time_range_years,
             },
             ensure_ascii=False,
         )
@@ -184,10 +183,7 @@ class LLMJudgeEngine:
         return {
             "case_id": similar_case.case_id,
             "location": similar_case.location,
-            "location_district": similar_case.location_district,
             "reported_persons": similar_case.reported_persons,
             "reporter": similar_case.reporter,
             "description_text": similar_case.description_text or "",
-            "similarity_score": similar_case.similarity_score,
-            "rank": similar_case.rank,
         }

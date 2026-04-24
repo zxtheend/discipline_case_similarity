@@ -58,7 +58,7 @@
 - 当前识别召回规则已落地：
   - Qdrant 第一阶段过滤条件为：
     - 必须包含被举报人
-    - `create_time` 在最近 `N` 年内
+    - `create_time` 落在请求时间段内
   - 被举报人重合奖励已移除，避免与硬过滤重复放大同一信号
 - 本机联调环境已具备：
   - `mysql`
@@ -171,7 +171,8 @@ flowchart LR
   "reporter": "张三",
   "location": "太原市",
   "description": "反映王建国在城改项目中收受礼金并指定亲属承包附属工程",
-  "time_range_years": 5
+  "start_time": "2021-01-01T00:00:00+00:00",
+  "end_time": "2026-12-31T23:59:59+00:00"
 }
 ```
 
@@ -205,11 +206,8 @@ flowchart LR
   "reporter": "张三",
   "location": "太原市",
   "description": "反映王建国在城改项目中收受礼金并指定亲属承包附属工程",
-  "time_range_years": 5,
   "similar_case": {
     "case_id": "CASE-0001",
-    "similarity_score": 91,
-    "rank": 1,
     "location": "太原市",
     "reported_persons": ["王建国"],
     "reporter": "李四",
@@ -591,7 +589,8 @@ curl -X POST http://127.0.0.1:8000/api/v1/identify \
     "reporter": "测试举报人",
     "location": "太原市",
     "description": "反映王建国在城改项目中收受礼金并指定亲属承包附属工程",
-    "time_range_years": 5
+    "start_time": "2021-01-01T00:00:00+00:00",
+    "end_time": "2026-12-31T23:59:59+00:00"
   }'
 ```
 
@@ -605,11 +604,8 @@ curl -X POST http://127.0.0.1:8000/api/v1/clues \
     "reporter": "测试举报人",
     "location": "太原市",
     "description": "反映王建国在城改项目中收受礼金并指定亲属承包附属工程",
-    "time_range_years": 5,
     "similar_case": {
       "case_id": "CASE-0001",
-      "similarity_score": 91,
-      "rank": 1,
       "location": "太原市",
       "reported_persons": ["王建国"],
       "reporter": "李四",

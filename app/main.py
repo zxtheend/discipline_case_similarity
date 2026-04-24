@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
@@ -57,6 +58,29 @@ def create_app() -> FastAPI:
             retryable=exc.retryable,
         )
         return JSONResponse(status_code=exc.status_code, content=payload.model_dump())
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(request: Request, exc: RequestValidationError):
+        raw_body = await request.body()
+        request_id = getattr(request.state, "request_id", "unknown")
+        body_json = raw_body.decode("utf-8", errors="replace")
+        logger.warning(
+            "request_validation_error request_id=%s body_json=%s",
+            request_id,
+            body_json,
+            extra={
+                "request_id": request_id,
+                "details": exc.errors(),
+                "body_json": body_json,
+            },
+        )
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": exc.errors(),
+                "request_id": request_id,
+            },
+        )
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception):

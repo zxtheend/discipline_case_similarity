@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -10,7 +11,7 @@ from qdrant_client.http import models as qdrant_models
 from app.config import Settings
 from app.errors import ServiceError
 from app.models.domain import QueryEmbedding, RowDecryptionResult, SourceTableRow, SyncRunResult
-from app.models.request import RebuildRowRequest
+from app.models.request import ClueMiningRequest, IdentifyRequest, RebuildRowRequest
 from app.services.decrypt_service import NoopDecryptProvider
 from app.services.mysql_service import MySQLService
 from app.services.qdrant_service import QdrantService
@@ -422,6 +423,35 @@ class SyncServiceTests(unittest.IsolatedAsyncioTestCase):
             [[upserted_cases[0].document_text]],
         )
 
+    async def test_rebuild_row_accepts_base64_wrapped_streamsets_payload_from_log(self):
+        service, _, qdrant_service, _ = self.make_service(
+            mysql_service=FakeMySQLService([[]]),
+            decrypt_provider=NoopDecryptProvider(),
+        )
+
+        result = await service.rebuild_row(
+            request_id="req-streamsets",
+            row=SourceTableRow(
+                case_id="00fd0146941bfdf4066e",
+                source_wtxx_bh="00fd0146941bfdf4066b",
+                petition_id="00fd0146941bfdf4066b",
+                location="太原市杏花岭区",
+                encrypted_reported_persons=(
+                    "eyJ6aiI6IjE3IiwibWMiOiJjMmY2IGI0ZTggY2FhZSAifQ=="
+                ),
+                encrypted_reporter=None,
+                encrypted_description=(
+                    "MzMgMzEgMzIgMzMgYzVlYiBkM2YzIGIzYzcgY2ZmMiBiNGY3IGQwZDcgY2ZjYiBjZGUzIGI3ZjkgYmNiNCBkM2NhIGIzYzcgY2ZmMiBiM2MwIGQ0ZWMgYjZlOCBjNWQ1IGIzYzAgYTRhZCBjZmYwIGQzYjYgYjNjMCBkMGUxIGJhYjUgYmVlMiBhNGFkIGNjYmUgZDdjNyBiN2Q1IGQ1YjIgYmFhNSBkNGM0IGQxY2QgYTRhZCBiN2Y5IGM4ZDMgYmFjZSBkNGI3IGIyYTQgYjJlYiBiOGM4IGI4YTkgYmZkMSBiZWZjIGIzYTMgYzZiOCBiNWYzIGQ1YjIgYmFhNSBhNGFkIGIzYTMgYzhkMyBiNWU3IGQ1ZGIgY2ViNiBjY2IxIGMzYWEgY2NiMSBhNGFkIGQ0ZDEgYzVkYiBjZWUzIGMyYmUgY2RhOSBiOGZmIGNmZjIgYzdmOCBhNGFkIGM1ZGIgYjNjMCBiOGZmIGNmZjIgYzdmOCBjZmFiIGQ2ZTcgY2JiNiBiNmM1IGE0YWQgYjdmOSBjZWUzIGI4ZmYgY2ZmMiBkOGE5IGM0YzYgYjlmOSBjY2IxIGNmZjIgYmZkNyBiM2VhIGNiYjIgZDRjNCBhNGFkIGJjYmEgZDRkMSBiN2UxIGM0ZmMgYzhlYSBjOWNjIGE0YTkgZDhkZCBiZmFlIGMxZWUgYjRjMyBiMmE3IGM4ZGEgYmJjZSBjNGMxIGM5ZGUgYjNjMCBiZmFlIGMxZWUgYTRhYSBhNGFkIGIzYTMgYzhkMyBkNWY5IGJhY2UgZDRiNyBjY2M1IGI1YTkgYjZjNSBkM2JjIGM0ZmMgY2VjYyBjZmVhIGJmZmQgYzljYyBjZmFiIGIyYTQgZjBkYiBjNWM0IGMwYjQgYjZiNyBjZWZmIGQxYjMgY2NiMSBjZmYyIGJmZDcgYjVhNyBiNGE1IGE0YWQgYzBjNyBiNGE1IA=="
+                ),
+                create_time=datetime(2014, 6, 13, 23, 23, 20, 948000, tzinfo=timezone.utc),
+            ),
+        )
+
+        self.assertEqual(result.total_upserted, 1)
+        upserted_case = qdrant_service.upsert_calls[0][0][0]
+        self.assertEqual(upserted_case.reported_persons, ["刘崇森"])
+        self.assertTrue(upserted_case.description_text.startswith("2012年因财务出现问题"))
+
     async def test_rebuild_row_raises_for_invalid_payload(self):
         mysql_service = FakeMySQLService([[]])
         decrypt_provider = FakeDecryptProvider(
@@ -601,8 +631,66 @@ class DecryptProviderTests(unittest.TestCase):
 
         self.assertEqual(value, '{"zj":"13","mc":"潞安矿业集团"}')
 
+    def test_noop_decrypt_provider_decodes_base64_wrapped_json_from_streamsets(self):
+        provider = NoopDecryptProvider()
+        wrapped = base64.b64encode(
+            '{"zj":"17","mc":"c2f6 b4e8 caae "}'.encode("utf-8")
+        ).decode("ascii")
+
+        value = provider._normalize_value(wrapped)
+
+        self.assertEqual(value, '{"zj":"17","mc":"刘崇森"}')
+
+    def test_noop_decrypt_provider_decodes_streamsets_payload_from_log(self):
+        provider = NoopDecryptProvider()
+
+        reported_persons = provider._normalize_value(
+            "eyJ6aiI6IjE3IiwibWMiOiJjMmY2IGI0ZTggY2FhZSAifQ=="
+        )
+        description = provider._normalize_value(
+            "MzMgMzEgMzIgMzMgYzVlYiBkM2YzIGIzYzcgY2ZmMiBiNGY3IGQwZDcgY2ZjYiBjZGUzIGI3ZjkgYmNiNCBkM2NhIGIzYzcgY2ZmMiBiM2MwIGQ0ZWMgYjZlOCBjNWQ1IGIzYzAgYTRhZCBjZmYwIGQzYjYgYjNjMCBkMGUxIGJhYjUgYmVlMiBhNGFkIGNjYmUgZDdjNyBiN2Q1IGQ1YjIgYmFhNSBkNGM0IGQxY2QgYTRhZCBiN2Y5IGM4ZDMgYmFjZSBkNGI3IGIyYTQgYjJlYiBiOGM4IGI4YTkgYmZkMSBiZWZjIGIzYTMgYzZiOCBiNWYzIGQ1YjIgYmFhNSBhNGFkIGIzYTMgYzhkMyBiNWU3IGQ1ZGIgY2ViNiBjY2IxIGMzYWEgY2NiMSBhNGFkIGQ0ZDEgYzVkYiBjZWUzIGMyYmUgY2RhOSBiOGZmIGNmZjIgYzdmOCBhNGFkIGM1ZGIgYjNjMCBiOGZmIGNmZjIgYzdmOCBjZmFiIGQ2ZTcgY2JiNiBiNmM1IGE0YWQgYjdmOSBjZWUzIGI4ZmYgY2ZmMiBkOGE5IGM0YzYgYjlmOSBjY2IxIGNmZjIgYmZkNyBiM2VhIGNiYjIgZDRjNCBhNGFkIGJjYmEgZDRkMSBiN2UxIGM0ZmMgYzhlYSBjOWNjIGE0YTkgZDhkZCBiZmFlIGMxZWUgYjRjMyBiMmE3IGM4ZGEgYmJjZSBjNGMxIGM5ZGUgYjNjMCBiZmFlIGMxZWUgYTRhYSBhNGFkIGIzYTMgYzhkMyBkNWY5IGJhY2UgZDRiNyBjY2M1IGI1YTkgYjZjNSBkM2JjIGM0ZmMgY2VjYyBjZmVhIGJmZmQgYzljYyBjZmFiIGIyYTQgZjBkYiBjNWM0IGMwYjQgYjZiNyBjZWZmIGQxYjMgY2NiMSBjZmYyIGJmZDcgYjVhNyBiNGE1IGE0YWQgYzBjNyBiNGE1IA=="
+        )
+
+        self.assertEqual(reported_persons, '{"zj":"17","mc":"刘崇森"}')
+        self.assertEqual(split_reported_persons(reported_persons), ["刘崇森"])
+        self.assertTrue(description.startswith("2012年因财务出现问题"))
+
+    def test_noop_decrypt_provider_decodes_base64_wrapped_hex_text_from_streamsets(self):
+        provider = NoopDecryptProvider()
+        wrapped = base64.b64encode("badd c1ee bced c3d3 cfcb cde3 a2a4".encode("utf-8")).decode(
+            "ascii"
+        )
+
+        value = provider._normalize_value(wrapped)
+
+        self.assertEqual(value, "管理混乱问题。")
+
 
 class RequestModelTests(unittest.TestCase):
+    def test_identify_request_defaults_to_recent_five_year_window(self):
+        payload = IdentifyRequest(
+            reported_persons=["王建国"],
+            reporter="张三",
+            location="太原市",
+            description="测试描述",
+        )
+
+        self.assertIsNotNone(payload.start_time)
+        self.assertIsNotNone(payload.end_time)
+        self.assertLess(payload.start_time, payload.end_time)
+        self.assertGreaterEqual((payload.end_time - payload.start_time).days, 365 * 4)
+
+    def test_identify_request_rejects_inverted_time_range(self):
+        with self.assertRaises(ValidationError):
+            IdentifyRequest(
+                reported_persons=["王建国"],
+                reporter="张三",
+                location="太原市",
+                description="测试描述",
+                start_time=datetime(2026, 1, 2, tzinfo=timezone.utc),
+                end_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+
     def test_rebuild_row_request_requires_source_wtxx_bh_and_petition_id(self):
         with self.assertRaises(ValidationError):
             RebuildRowRequest(
@@ -625,6 +713,44 @@ class RequestModelTests(unittest.TestCase):
         )
 
         self.assertIsNone(payload.location)
+
+    def test_clue_mining_request_rejects_removed_legacy_fields(self):
+        with self.assertRaises(ValidationError):
+            ClueMiningRequest(
+                reported_persons=["王建国"],
+                reporter="张三",
+                location="太原市",
+                description="测试描述",
+                start_time=datetime(2021, 1, 1, tzinfo=timezone.utc),
+                end_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                similar_case={
+                    "case_id": "CASE-001",
+                    "similarity_score": 91,
+                    "rank": 1,
+                    "location": "太原市",
+                    "reported_persons": ["王建国"],
+                    "reporter": "李四",
+                    "description_text": "历史案件正文",
+                },
+            )
+
+    def test_clue_mining_request_accepts_minimal_new_shape(self):
+        payload = ClueMiningRequest(
+            reported_persons=["王建国"],
+            reporter="张三",
+            location="太原市",
+            description="测试描述",
+            similar_case={
+                "case_id": "CASE-001",
+                "location": "太原市",
+                "reported_persons": ["王建国"],
+                "reporter": "李四",
+                "description_text": "历史案件正文",
+            },
+        )
+
+        self.assertEqual(payload.similar_case.case_id, "CASE-001")
+        self.assertEqual(payload.similar_case.reporter, "李四")
 
 
 class QdrantServiceTests(unittest.TestCase):
@@ -745,6 +871,46 @@ class SyncEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.mode, "rebuild-row")
         self.assertEqual(response.total_upserted, 1)
         self.assertEqual(sync_service.last_row.case_id, "CASE-030")
+
+    async def test_rebuild_row_endpoint_logs_payload_when_service_fails(self):
+        try:
+            from app.api.v1.endpoints.sync import trigger_rebuild_row
+        except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
+            self.skipTest(str(exc))
+
+        class FakeSyncService:
+            async def rebuild_row(self, request_id, row):
+                raise ServiceError(
+                    error_code="embedding_failed",
+                    message="Embedding request failed",
+                    status_code=502,
+                )
+
+        container = SimpleNamespace(
+            settings=SimpleNamespace(lock_timeout_seconds=0.05),
+            runtime_lock=asyncio.Lock(),
+            sync_lock=asyncio.Lock(),
+            sync_service=FakeSyncService(),
+        )
+        payload = RebuildRowRequest(
+            case_id="CASE-031",
+            source_wtxx_bh="XFJ-031",
+            petition_id="XFJ-031",
+            location="太原市",
+            encrypted_reported_persons="王建国",
+            encrypted_reporter="举报人丁",
+            encrypted_description="案情内容",
+            create_time=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        )
+
+        with self.assertLogs("sync_api", level="ERROR") as captured:
+            with self.assertRaises(ServiceError):
+                await trigger_rebuild_row(payload, self.make_request(container, request_id="req-log"))
+
+        combined_logs = "\n".join(captured.output)
+        self.assertIn("rebuild_row_failed", combined_logs)
+        self.assertIn('"case_id":"CASE-031"', combined_logs)
+        self.assertIn("req-log", combined_logs)
 
 
 if __name__ == "__main__":

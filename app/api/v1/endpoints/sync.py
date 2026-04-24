@@ -7,8 +7,10 @@ from app.errors import ServiceError
 from app.models.domain import SourceTableRow
 from app.models.request import RebuildRowRequest
 from app.models.response import ApiErrorResponse, SyncResponse
+from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/admin/sync", tags=["sync"])
+logger = get_logger("sync_api")
 
 
 async def _try_acquire(lock: asyncio.Lock, timeout_seconds: float) -> bool:
@@ -96,6 +98,28 @@ async def trigger_rebuild_row(payload: RebuildRowRequest, request: Request) -> S
             row=SourceTableRow.model_validate(payload.model_dump()),
         )
         return _build_sync_response(result)
+    except Exception as exc:
+        payload_json = payload.model_dump_json()
+        extra = {
+            "request_id": request_id,
+            "payload_json": payload_json,
+        }
+        if isinstance(exc, ServiceError):
+            extra["error_code"] = exc.error_code
+            logger.error(
+                "rebuild_row_failed request_id=%s payload_json=%s",
+                request_id,
+                payload_json,
+                extra=extra,
+            )
+        else:
+            logger.exception(
+                "rebuild_row_failed request_id=%s payload_json=%s",
+                request_id,
+                payload_json,
+                extra=extra,
+            )
+        raise
     finally:
         _release_sync_guards(container)
 
