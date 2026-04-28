@@ -75,6 +75,7 @@ class IdentifyPipeline:
             similar_cases=[
                 SimilarCase(
                     case_id=request.similar_case.case_id,
+                    petition_id=None,
                     similarity_score=0,
                     rank=1,
                     location=request.similar_case.location,
@@ -107,6 +108,7 @@ class IdentifyPipeline:
             similar_cases.append(
                 SimilarCase(
                     case_id=candidate.case_id,
+                    petition_id=candidate.petition_id,
                     similarity_score=similarity_score,
                     rank=rank,
                     location=candidate.location,

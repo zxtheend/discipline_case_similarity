@@ -95,6 +95,7 @@ class RowDecryptionResult(BaseModel):
 
 class SearchCandidate(BaseModel):
     case_id: str
+    petition_id: Optional[str] = None
     location: Optional[str] = None
     location_district: Optional[str] = None
     reported_persons: List[str] = Field(default_factory=list)

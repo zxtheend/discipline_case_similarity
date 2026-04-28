@@ -8,11 +8,13 @@ from qdrant_client.http import models
 from app.config import Settings
 from app.errors import ServiceError
 from app.models.domain import QueryEmbedding, SearchCandidate, SourceCase
+from app.utils.logger import get_logger
 
 
 class QdrantService:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._logger = get_logger("qdrant_service")
         self._client = AsyncQdrantClient(
             host=settings.qdrant_host,
             port=settings.qdrant_port,
@@ -102,6 +104,9 @@ class QdrantService:
         query_filter: models.Filter,
         limit: int,
     ) -> List[SearchCandidate]:
+        if not embedding.sparse_vector.indices or not embedding.sparse_vector.values:
+            self._logger.info("empty_sparse_query")
+            return []
         sparse_vector = models.SparseVector(
             indices=embedding.sparse_vector.indices,
             values=embedding.sparse_vector.values,
@@ -116,6 +121,21 @@ class QdrantService:
         )
         points = response.points
         return [self._point_to_candidate(point, score_field="sparse_score") for point in points]
+
+    async def fetch_filtered_candidates(
+        self,
+        query_filter: models.Filter,
+        limit: int,
+    ) -> List[SearchCandidate]:
+        response = await self._client.scroll(
+            collection_name=self._settings.qdrant_collection,
+            scroll_filter=query_filter,
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        points = response[0]
+        return [self._point_to_candidate(point, score_field="dense_score") for point in points]
 
     async def _ensure_payload_indexes(self) -> None:
         await self._client.create_payload_index(
@@ -150,12 +170,14 @@ class QdrantService:
 
     def _point_to_candidate(
         self,
-        point: models.ScoredPoint,
+        point: models.ScoredPoint | models.Record,
         score_field: str,
     ) -> SearchCandidate:
         payload = point.payload or {}
+        extra_payload = payload.get("extra") or {}
         base_kwargs = {
             "case_id": str(payload.get("case_id", point.id)),
+            "petition_id": extra_payload.get("petition_id"),
             "location": payload.get("location"),
             "location_district": payload.get("location_district"),
             "reported_persons": payload.get("reported_persons") or [],
@@ -164,7 +186,7 @@ class QdrantService:
             "create_time": self._parse_datetime(payload.get("create_time")),
             "updated_at": self._parse_datetime(payload.get("updated_at")),
         }
-        base_kwargs[score_field] = float(point.score)
+        base_kwargs[score_field] = float(getattr(point, "score", 0.0))
         return SearchCandidate(**base_kwargs)
 
     def _parse_datetime(self, value):

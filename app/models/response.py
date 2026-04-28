@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class SimilarCase(BaseModel):
     case_id: str
+    petition_id: Optional[str] = None
     similarity_score: int = Field(ge=0, le=100)
     rank: int = Field(ge=1)
     location: Optional[str] = None

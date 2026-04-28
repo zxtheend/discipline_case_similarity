@@ -60,6 +60,11 @@
     - 必须包含被举报人
     - `create_time` 落在请求时间段内
   - 被举报人重合奖励已移除，避免与硬过滤重复放大同一信号
+- 当前 `bge-m3` sparse 链路已补齐：
+  - `/v1/embeddings` 提供 dense 向量
+  - `/pooling`（`task=token_classify`）提供 token 级 sparse 分数
+  - `/tokenize` 提供 token ids / token_strs
+  - 应用侧按 `bge-m3` tokenizer token id 聚合为 Qdrant sparse 向量
 - 本机联调环境已具备：
   - `mysql`
   - `qdrant`
@@ -144,9 +149,10 @@ flowchart LR
 3. 生成 query 的 dense / sparse 向量
 4. 在 Qdrant 中执行 dense 与 sparse 双路召回
 5. 用 RRF 融合得到候选集
-6. 用 rerank 模型收敛候选顺序
-7. 返回结构化相似案件结果
-8. 如需新线索，再调用独立 `clues` 接口，对比用户选中的历史案件识别当前新案件新增信息
+6. 如同一被举报人下的候选过少，则按同人过滤结果补齐一批保底候选，默认尽量补到约 10 条再交给 rerank
+7. 用 rerank 模型收敛候选顺序
+8. 返回结构化相似案件结果
+9. 如需新线索，再调用独立 `clues` 接口，对比用户选中的历史案件识别当前新案件新增信息
 
 ### 4.3 同步链路
 
@@ -183,6 +189,7 @@ flowchart LR
   "similar_cases": [
     {
       "case_id": "CASE-0001",
+      "petition_id": "PET-0001",
       "similarity_score": 91,
       "rank": 1,
       "location": "太原市",
@@ -325,11 +332,9 @@ flowchart LR
 
 ### 5.3 并发与运行约束
 
-- `identify` 默认单并发
-- `sync` 与 `identify` 互斥，避免争抢单卡资源
-- 使用两个锁控制：
-  - `runtime_lock`：识别链路独占
-  - `sync_lock`：同步任务串行
+- 当前版本不再在 API 层对 `identify`、`clues`、`full_sync`、`rebuild-row` 做互斥加锁
+- 允许识别请求与同步请求并发进入，是否需要进一步做资源隔离由部署侧自行控制
+- 在离线单机单卡环境下，如并发较高，可能出现吞吐下降、显存抖动或模型侧超时，建议按实际资源情况控制调用节奏
 
 ### 5.4 Qdrant 设计
 
@@ -339,6 +344,7 @@ flowchart LR
 - dense 向量字段：`dense_vector`
 - sparse 向量字段：`sparse_vector`
 - dense 维度：`1024`
+- sparse 词项空间：`bge-m3` tokenizer token id（不是业务词表，也不是中文分词词表）
 
 当前 payload 主要字段：
 
@@ -504,6 +510,19 @@ RUNTIME_NO_PROXY=localhost,127.0.0.1,host.docker.internal,mysql,qdrant
 MYSQL_HOST=156.5.32.67
 MYSQL_PORT=3306
 ```
+
+其中 embedding 服务若使用 `BAAI/bge-m3`，启动 vLLM 时需要显式加：
+
+```bash
+--hf-overrides '{"architectures": ["BgeM3EmbeddingModel"]}'
+```
+
+当前 sparse 生效依赖如下：
+
+- `/v1/embeddings` 返回 dense
+- `/pooling` 返回 token 级 sparse 分数
+- `/tokenize` 返回 token ids
+- 同步后如需让历史数据补齐 sparse，必须重跑 `full_sync`
 
 推荐启动顺序：
 

@@ -82,6 +82,7 @@ class FakeEmbeddingService:
         return [
             QueryEmbedding(
                 dense_vector=[0.1, 0.2],
+                sparse_vector={"indices": [1, 2], "values": [0.5, 0.25]},
             )
             for _ in texts
         ]
@@ -197,6 +198,9 @@ class SyncServiceTests(unittest.IsolatedAsyncioTestCase):
             embedding_service.calls,
             [[upserted_cases[0].document_text]],
         )
+        _, embeddings = qdrant_service.upsert_calls[0]
+        self.assertEqual(embeddings[0].sparse_vector.indices, [1, 2])
+        self.assertEqual(embeddings[0].sparse_vector.values, [0.5, 0.25])
 
     async def test_full_sync_continues_when_single_row_embedding_fails(self):
         mysql_service = FakeMySQLService(
@@ -780,6 +784,65 @@ class QdrantServiceTests(unittest.TestCase):
 
         self.assertIsNone(candidate.location)
         self.assertIn("属地: ", candidate.rerank_document)
+
+
+class QdrantServiceAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_search_sparse_short_circuits_when_query_sparse_is_empty(self):
+        service = QdrantService(
+            Settings(
+                prompt_dir="prompts",
+                state_dir="data/app_state",
+            )
+        )
+
+        class ClientShouldNotBeCalled:
+            async def query_points(self, **kwargs):
+                raise AssertionError("query_points should not be called for empty sparse queries")
+
+        service._client = ClientShouldNotBeCalled()
+
+        result = await service.search_sparse(
+            QueryEmbedding(dense_vector=[0.1, 0.2]),
+            query_filter=qdrant_models.Filter(),
+            limit=10,
+        )
+
+        self.assertEqual(result, [])
+
+    async def test_fetch_filtered_candidates_returns_candidates_from_scroll(self):
+        service = QdrantService(
+            Settings(
+                prompt_dir="prompts",
+                state_dir="data/app_state",
+            )
+        )
+        point = qdrant_models.Record(
+            id="point-1",
+            payload={
+                "case_id": "CASE-200",
+                "location": "太原市",
+                "reported_persons": ["王建国"],
+                "reporter": "张某",
+                "description_text": "有效内容",
+                "create_time": "2024-01-01T00:00:00+00:00",
+                "updated_at": "2024-01-01T00:00:00+00:00",
+            },
+            vector=None,
+        )
+
+        class ScrollClient:
+            async def scroll(self, **kwargs):
+                return ([point], None)
+
+        service._client = ScrollClient()
+
+        results = await service.fetch_filtered_candidates(
+            query_filter=qdrant_models.Filter(),
+            limit=10,
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].case_id, "CASE-200")
 
 
 class SyncEndpointTests(unittest.IsolatedAsyncioTestCase):

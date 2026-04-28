@@ -31,6 +31,7 @@ async def build_container(settings: Optional[Settings] = None) -> ApplicationCon
         timeout_seconds=active_settings.http_timeout_seconds,
         retry_attempts=active_settings.embedding_retry_attempts,
         retry_backoff_seconds=active_settings.embedding_retry_backoff_seconds,
+        enable_sparse=active_settings.embedding_enable_sparse,
     )
     rerank_service = RerankService(
         base_url=active_settings.rerank_base_url,

@@ -78,6 +78,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_identify_returns_ranked_similar_cases_without_llm(self):
         candidate = SearchCandidate(
             case_id="CASE-001",
+            petition_id="PET-001",
             location="太原市",
             location_district="小店区",
             reported_persons=["王建国"],
@@ -110,6 +111,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(llm_judge_engine.judge_calls, 0)
         self.assertEqual(len(response.similar_cases), 1)
         self.assertEqual(response.similar_cases[0].case_id, "CASE-001")
+        self.assertEqual(response.similar_cases[0].petition_id, "PET-001")
         self.assertEqual(response.similar_cases[0].similarity_score, 87)
         self.assertEqual(response.similar_cases[0].reported_persons, ["王建国"])
         self.assertEqual(audit_logger.events[0]["event_type"], "identify_completed")

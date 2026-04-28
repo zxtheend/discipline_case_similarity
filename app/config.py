@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = 60.0
     embedding_retry_attempts: int = 3
     embedding_retry_backoff_seconds: float = 1.0
+    embedding_enable_sparse: bool = True
 
     mysql_host: str = "localhost"
     mysql_port: int = 3306
@@ -55,6 +56,8 @@ class Settings(BaseSettings):
     hybrid_limit: int = 50
     rerank_top_n: int = 20
     judge_top_n: int = 5
+    fallback_min_candidates: int = 10
+    fallback_max_fetch: int = 10
     sync_batch_size: int = 32
     identify_concurrency: int = 1
     lock_timeout_seconds: float = 0.05

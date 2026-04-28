@@ -1,5 +1,3 @@
-import asyncio
-
 from fastapi import APIRouter, Request
 
 from app.api.dependencies import get_container
@@ -11,14 +9,6 @@ from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/admin/sync", tags=["sync"])
 logger = get_logger("sync_api")
-
-
-async def _try_acquire(lock: asyncio.Lock, timeout_seconds: float) -> bool:
-    try:
-        await asyncio.wait_for(lock.acquire(), timeout=timeout_seconds)
-        return True
-    except asyncio.TimeoutError:
-        return False
 
 
 def _build_sync_response(result) -> SyncResponse:
@@ -34,50 +24,16 @@ def _build_sync_response(result) -> SyncResponse:
     )
 
 
-async def _acquire_sync_guards(request: Request):
-    container = get_container(request)
-    timeout_seconds = container.settings.lock_timeout_seconds
-    runtime_acquired = await _try_acquire(container.runtime_lock, timeout_seconds)
-    if not runtime_acquired:
-        raise ServiceError(
-            error_code="sync_busy",
-            message="The service is busy with another identify or sync task.",
-            status_code=429,
-            retryable=True,
-        )
-
-    sync_acquired = await _try_acquire(container.sync_lock, timeout_seconds)
-    if not sync_acquired:
-        container.runtime_lock.release()
-        raise ServiceError(
-            error_code="sync_busy",
-            message="Another sync task is already running.",
-            status_code=429,
-            retryable=True,
-        )
-    return container
-
-
-def _release_sync_guards(container) -> None:
-    if container.sync_lock.locked():
-        container.sync_lock.release()
-    if container.runtime_lock.locked():
-        container.runtime_lock.release()
-
-
 @router.post(
     "/full",
     response_model=SyncResponse,
-    responses={429: {"model": ApiErrorResponse}, 500: {"model": ApiErrorResponse}},
+    responses={500: {"model": ApiErrorResponse}},
 )
 async def trigger_full_sync(request: Request) -> SyncResponse:
-    container = await _acquire_sync_guards(request)
+    container = get_container(request)
     request_id = request.state.request_id
-    try:
-        result = await container.sync_service.full_sync(request_id=request_id)
-        return _build_sync_response(result)
-    finally:
-        _release_sync_guards(container)
+    result = await container.sync_service.full_sync(request_id=request_id)
+    return _build_sync_response(result)
 
 
 @router.post(
@@ -85,12 +41,11 @@ async def trigger_full_sync(request: Request) -> SyncResponse:
     response_model=SyncResponse,
     responses={
         400: {"model": ApiErrorResponse},
-        429: {"model": ApiErrorResponse},
         500: {"model": ApiErrorResponse},
     },
 )
 async def trigger_rebuild_row(payload: RebuildRowRequest, request: Request) -> SyncResponse:
-    container = await _acquire_sync_guards(request)
+    container = get_container(request)
     request_id = request.state.request_id
     try:
         result = await container.sync_service.rebuild_row(
@@ -120,8 +75,6 @@ async def trigger_rebuild_row(payload: RebuildRowRequest, request: Request) -> S
                 extra=extra,
             )
         raise
-    finally:
-        _release_sync_guards(container)
 
 
 @router.post(

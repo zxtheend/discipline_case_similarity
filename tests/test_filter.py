@@ -17,11 +17,11 @@ class FilterTests(unittest.TestCase):
         self.assertEqual(qdrant_filter.must[1].key, "create_time")
         self.assertEqual(
             qdrant_filter.must[1].range.gte,
-            datetime(2021, 1, 1, tzinfo=timezone.utc),
+            "2021-01-01T00:00:00",
         )
         self.assertEqual(
             qdrant_filter.must[1].range.lte,
-            datetime(2026, 12, 31, tzinfo=timezone.utc),
+            "2026-12-31T00:00:00",
         )
 
 
