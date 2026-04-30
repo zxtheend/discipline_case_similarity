@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Iterable
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -15,7 +15,7 @@ class EmbeddingService(BaseHTTPService):
         self,
         base_url: str,
         model_name: str,
-        api_key: str | None,
+        api_key: Optional[str],
         timeout_seconds: float,
         retry_attempts: int = 3,
         retry_backoff_seconds: float = 1.0,
@@ -119,7 +119,7 @@ class EmbeddingService(BaseHTTPService):
         transport_error_code: str,
         transport_message: str,
     ) -> httpx.Response:
-        last_error: ServiceError | None = None
+        last_error: Optional[ServiceError] = None
         for attempt in range(1, self._retry_attempts + 1):
             try:
                 return await self._client.post(url, json=payload)

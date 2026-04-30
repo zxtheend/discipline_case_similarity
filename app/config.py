@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     log_level: str = "INFO"
     state_dir: Path = Field(default=Path("./data/app_state"))
+    log_dir: Path = Field(default=Path("./data/logs"))
     prompt_dir: Path = Field(default=Path("./prompts"))
 
     qdrant_host: str = "localhost"
@@ -54,13 +55,13 @@ class Settings(BaseSettings):
     filter_years: int = 5
     rrf_k: int = 60
     hybrid_limit: int = 50
+    hybrid_location_boost: float = 0.03
     rerank_top_n: int = 20
     judge_top_n: int = 5
+    identify_top_n: int = 5
     fallback_min_candidates: int = 10
     fallback_max_fetch: int = 10
     sync_batch_size: int = 32
-    identify_concurrency: int = 1
-    lock_timeout_seconds: float = 0.05
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -69,10 +70,6 @@ class Settings(BaseSettings):
         case_sensitive=False,
         protected_namespaces=(),
     )
-
-    @property
-    def sync_state_path(self) -> Path:
-        return self.state_dir / "sync_state.json"
 
     @property
     def duplicate_prompt_path(self) -> Path:
@@ -89,6 +86,7 @@ class Settings(BaseSettings):
 
     def ensure_directories(self) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)

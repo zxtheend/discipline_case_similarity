@@ -117,6 +117,53 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(audit_logger.events[0]["event_type"], "identify_completed")
         self.assertEqual(audit_logger.events[0]["details"]["similar_case_count"], 1)
 
+    async def test_identify_uses_identify_top_n_when_present(self):
+        first_candidate = SearchCandidate(
+            case_id="CASE-001",
+            petition_id="PET-001",
+            location="太原市",
+            location_district="小店区",
+            reported_persons=["王建国"],
+            reporter="张某",
+            description_text="王建国收受礼金并安排亲属承揽工程。",
+            create_time=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            rerank_score=0.87,
+        )
+        second_candidate = SearchCandidate(
+            case_id="CASE-002",
+            petition_id="PET-002",
+            location="太原市",
+            location_district="迎泽区",
+            reported_persons=["王建国"],
+            reporter="李某",
+            description_text="王建国违规接受宴请。",
+            create_time=datetime(2024, 1, 3, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 1, 4, tzinfo=timezone.utc),
+            rerank_score=0.72,
+        )
+        object.__setattr__(self.settings, "identify_top_n", 1)
+        pipeline = IdentifyPipeline(
+            settings=self.settings,
+            hybrid_search_engine=FakeHybridSearchEngine([first_candidate, second_candidate]),
+            rerank_engine=FakeRerankEngine([first_candidate, second_candidate]),
+            llm_judge_engine=FakeLLMJudgeEngine(FakeClueResult([], [])),
+            audit_logger=FakeAuditLogger(),
+        )
+
+        response = await pipeline.identify(
+            IdentifyRequest(
+                reported_persons=["王建国"],
+                reporter="张某",
+                location="太原市",
+                description="王建国收受礼金",
+            ),
+            request_id="req-identify-top-n",
+        )
+
+        self.assertEqual([item.case_id for item in response.similar_cases], ["CASE-001"])
+        self.assertEqual(response.similar_cases[0].rank, 1)
+
     async def test_mine_clues_uses_client_supplied_similar_case(self):
         llm_judge_engine = FakeLLMJudgeEngine(
             FakeClueResult(

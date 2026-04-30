@@ -46,6 +46,7 @@ services:
         condition: service_started
     volumes:
       - ./data/app_state:/app/data/app_state
+      - ./data/logs:/app/data/logs
 
 volumes:
   mysql_data:

@@ -4,27 +4,29 @@ from app.config import Settings
 from app.core.hybrid_search import HybridSearchEngine
 from app.core.llm_judge import LLMJudgeEngine
 from app.core.rerank import RerankEngine
+from app.core.similar_case_mapper import (
+    map_search_candidates_to_similar_cases,
+    resolve_identify_top_n,
+)
 from app.models.request import ClueMiningRequest, IdentifyRequest
 from app.models.response import ClueMiningResponse, IdentifyResponse, SimilarCase
 from app.utils.audit import AuditLogger
 
 
-class IdentifyPipeline:
+class IdentifyFlow:
     def __init__(
         self,
         settings: Settings,
         hybrid_search_engine: HybridSearchEngine,
         rerank_engine: RerankEngine,
-        llm_judge_engine: LLMJudgeEngine,
         audit_logger: AuditLogger,
     ) -> None:
         self._settings = settings
         self._hybrid_search_engine = hybrid_search_engine
         self._rerank_engine = rerank_engine
-        self._llm_judge_engine = llm_judge_engine
         self._audit_logger = audit_logger
 
-    async def identify(self, request: IdentifyRequest, request_id: str) -> IdentifyResponse:
+    async def execute(self, request: IdentifyRequest, request_id: str) -> IdentifyResponse:
         started = perf_counter()
         hybrid_candidates = await self._hybrid_search_engine.search(request)
         if not hybrid_candidates:
@@ -46,7 +48,10 @@ class IdentifyPipeline:
             candidates=hybrid_candidates,
         )
         response = IdentifyResponse(
-            similar_cases=self._to_similar_cases(reranked_candidates),
+            similar_cases=map_search_candidates_to_similar_cases(
+                reranked_candidates,
+                top_n=resolve_identify_top_n(self._settings),
+            ),
             processing_time_ms=int((perf_counter() - started) * 1000),
             request_id=request_id,
         )
@@ -58,7 +63,17 @@ class IdentifyPipeline:
         )
         return response
 
-    async def mine_clues(
+
+class ClueMiningFlow:
+    def __init__(
+        self,
+        llm_judge_engine: LLMJudgeEngine,
+        audit_logger: AuditLogger,
+    ) -> None:
+        self._llm_judge_engine = llm_judge_engine
+        self._audit_logger = audit_logger
+
+    async def execute(
         self,
         request: ClueMiningRequest,
         request_id: str,
@@ -100,24 +115,33 @@ class IdentifyPipeline:
         )
         return response
 
-    def _to_similar_cases(self, candidates):
-        similar_cases = []
-        for rank, candidate in enumerate(candidates[: self._settings.judge_top_n], start=1):
-            rerank_score = candidate.rerank_score or 0.0
-            similarity_score = max(0, min(100, int(round(rerank_score * 100))))
-            similar_cases.append(
-                SimilarCase(
-                    case_id=candidate.case_id,
-                    petition_id=candidate.petition_id,
-                    similarity_score=similarity_score,
-                    rank=rank,
-                    location=candidate.location,
-                    location_district=candidate.location_district,
-                    reported_persons=candidate.reported_persons,
-                    reporter=candidate.reporter,
-                    description_text=candidate.description_text,
-                    create_time=candidate.create_time,
-                    updated_at=candidate.updated_at,
-                )
-            )
-        return similar_cases
+
+class IdentifyPipeline:
+    def __init__(
+        self,
+        settings: Settings,
+        hybrid_search_engine: HybridSearchEngine,
+        rerank_engine: RerankEngine,
+        llm_judge_engine: LLMJudgeEngine,
+        audit_logger: AuditLogger,
+    ) -> None:
+        self._identify_flow = IdentifyFlow(
+            settings=settings,
+            hybrid_search_engine=hybrid_search_engine,
+            rerank_engine=rerank_engine,
+            audit_logger=audit_logger,
+        )
+        self._clue_mining_flow = ClueMiningFlow(
+            llm_judge_engine=llm_judge_engine,
+            audit_logger=audit_logger,
+        )
+
+    async def identify(self, request: IdentifyRequest, request_id: str) -> IdentifyResponse:
+        return await self._identify_flow.execute(request, request_id)
+
+    async def mine_clues(
+        self,
+        request: ClueMiningRequest,
+        request_id: str,
+    ) -> ClueMiningResponse:
+        return await self._clue_mining_flow.execute(request, request_id)

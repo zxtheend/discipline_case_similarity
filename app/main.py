@@ -1,17 +1,29 @@
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.api.dependencies import get_container, sanitize_for_logging, sanitize_request_body
 from app.api.v1.router import api_router
 from app.bootstrap import build_container, close_container
+from app.container import ApplicationContainer, ReadinessProbe
 from app.config import get_settings
 from app.errors import ServiceError
 from app.models.response import ApiErrorResponse, DependencyStatus, HealthResponse, ReadyResponse
-from app.utils.logger import configure_logging, get_logger
+from app.utils.logger import (
+    BUSINESS_LOG_CHANNEL,
+    SYNC_FULL_LOG_CHANNEL,
+    SYNC_REBUILD_LOG_CHANNEL,
+    configure_logging,
+    get_logger,
+    reset_log_channel,
+    set_log_channel,
+)
 
 
 logger = get_logger("main")
@@ -20,7 +32,7 @@ logger = get_logger("main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.log_dir)
     app.state.container = await build_container(settings)
     try:
         yield
@@ -37,9 +49,17 @@ def create_app() -> FastAPI:
     async def add_request_id(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
         request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
+        token = None
+        log_channel = _resolve_request_log_channel(str(request.url.path), settings.api_v1_prefix)
+        if log_channel is not None:
+            token = set_log_channel(log_channel)
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
+        finally:
+            if token is not None:
+                reset_log_channel(token)
 
     @app.exception_handler(ServiceError)
     async def service_error_handler(request: Request, exc: ServiceError):
@@ -48,7 +68,7 @@ def create_app() -> FastAPI:
             extra={
                 "request_id": getattr(request.state, "request_id", "unknown"),
                 "error_code": exc.error_code,
-                "details": exc.details,
+                "details": sanitize_for_logging(exc.details),
             },
         )
         payload = ApiErrorResponse(
@@ -63,14 +83,14 @@ def create_app() -> FastAPI:
     async def request_validation_error_handler(request: Request, exc: RequestValidationError):
         raw_body = await request.body()
         request_id = getattr(request.state, "request_id", "unknown")
-        body_json = raw_body.decode("utf-8", errors="replace")
+        body_json = sanitize_request_body(raw_body)
         logger.warning(
             "request_validation_error request_id=%s body_json=%s",
             request_id,
             body_json,
             extra={
                 "request_id": request_id,
-                "details": exc.errors(),
+                "details": sanitize_for_logging(exc.errors()),
                 "body_json": body_json,
             },
         )
@@ -102,15 +122,8 @@ def create_app() -> FastAPI:
 
     @app.get("/ready", response_model=ReadyResponse, tags=["ops"])
     async def ready(request: Request) -> ReadyResponse:
-        container = request.app.state.container
-        dependencies = await _check_dependencies(
-            [
-                ("qdrant", container.qdrant_service.check_ready()),
-                ("embedding", container.embedding_service.check_ready()),
-                ("rerank", container.rerank_service.check_ready()),
-                ("llm", container.llm_service.check_ready()),
-            ]
-        )
+        container = get_container(request)
+        dependencies = await _check_readiness_registry(container, "default")
         return ReadyResponse(
             status="ok" if all(item.healthy for item in dependencies) else "degraded",
             dependencies=dependencies,
@@ -118,14 +131,8 @@ def create_app() -> FastAPI:
 
     @app.get("/ready/sync", response_model=ReadyResponse, tags=["ops"])
     async def ready_sync(request: Request) -> ReadyResponse:
-        container = request.app.state.container
-        dependencies = await _check_dependencies(
-            [
-                ("mysql", container.mysql_service.check_ready()),
-                ("qdrant", container.qdrant_service.check_ready()),
-                ("embedding", container.embedding_service.check_ready()),
-            ]
-        )
+        container = get_container(request)
+        dependencies = await _check_readiness_registry(container, "sync")
         return ReadyResponse(
             status="ok" if all(item.healthy for item in dependencies) else "degraded",
             dependencies=dependencies,
@@ -134,15 +141,37 @@ def create_app() -> FastAPI:
     return app
 
 
-async def _check_dependencies(checks):
-    results = []
-    for name, coroutine in checks:
-        try:
-            await coroutine
-            results.append(DependencyStatus(name=name, healthy=True))
-        except Exception as exc:
-            results.append(DependencyStatus(name=name, healthy=False, detail=str(exc)))
-    return results
+async def _check_readiness_registry(
+    container: ApplicationContainer,
+    registry_name: str,
+) -> list[DependencyStatus]:
+    probes = container.get_readiness_probes(registry_name)
+    return list(await asyncio.gather(*(_check_dependency(probe) for probe in probes)))
+
+
+async def _check_dependency(probe: ReadinessProbe) -> DependencyStatus:
+    try:
+        await probe.check()
+        return DependencyStatus(name=probe.name, healthy=True)
+    except Exception as exc:
+        return DependencyStatus(name=probe.name, healthy=False, detail=str(exc))
 
 
 app = create_app()
+
+
+def _resolve_request_log_channel(request_path: str, api_v1_prefix: str) -> Optional[str]:
+    business_paths = {
+        "/health",
+        "/ready",
+        "/ready/sync",
+        "{0}/identify".format(api_v1_prefix),
+        "{0}/clues".format(api_v1_prefix),
+    }
+    if request_path in business_paths:
+        return BUSINESS_LOG_CHANNEL
+    if request_path == "{0}/admin/sync/rebuild-row".format(api_v1_prefix):
+        return SYNC_REBUILD_LOG_CHANNEL
+    if request_path == "{0}/admin/sync/full".format(api_v1_prefix):
+        return SYNC_FULL_LOG_CHANNEL
+    return None

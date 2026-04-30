@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import unittest
 from datetime import datetime, timezone
@@ -15,7 +14,10 @@ from app.models.request import ClueMiningRequest, IdentifyRequest, RebuildRowReq
 from app.services.decrypt_service import NoopDecryptProvider
 from app.services.mysql_service import MySQLService
 from app.services.qdrant_service import QdrantService
+from app.sync.decrypt import DecryptionCoordinator
 from app.sync.data_sync import DataSyncService, split_reported_persons
+from app.sync.mapping import SourceCaseMapper
+from app.sync.telemetry import SyncTelemetry
 from app.utils.audit import AuditLogger
 
 
@@ -141,7 +143,7 @@ class SyncServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         return service, embedding_service, qdrant_service, audit
 
-    async def test_full_sync_maps_joined_rows_and_upserts_valid_cases(self):
+    async def test_full_sync_maps_source_rows_and_upserts_valid_cases(self):
         mysql_service = FakeMySQLService(
             [
                 [
@@ -534,7 +536,7 @@ class SyncServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.exception.status_code, 400)
         self.assertEqual(context.exception.error_code, "missing_petition_id")
 
-    async def test_incremental_sync_service_raises_not_supported(self):
+    async def test_incremental_sync_service_is_deprecated_and_not_supported(self):
         mysql_service = FakeMySQLService([[]])
         decrypt_provider = FakeDecryptProvider({})
         service, _, _, _ = self.make_service(
@@ -546,6 +548,9 @@ class SyncServiceTests(unittest.IsolatedAsyncioTestCase):
             await service.incremental_sync(request_id="req-003")
 
         self.assertEqual(context.exception.status_code, 501)
+        self.assertEqual(context.exception.error_code, "incremental_not_supported")
+        self.assertIn("deprecated and not supported", context.exception.message)
+        self.assertIn("/admin/sync/rebuild-row", context.exception.message)
 
     async def test_full_sync_audit_event_includes_batch_counters(self):
         mysql_service = FakeMySQLService(
@@ -579,6 +584,116 @@ class SyncServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(batch_event["details"]["batch_number"], 1)
         self.assertEqual(batch_event["details"]["total_read"], 1)
         self.assertEqual(batch_event["details"]["total_upserted"], 1)
+
+    async def test_rebuild_row_audit_event_includes_case_id_and_upsert_count(self):
+        mysql_service = FakeMySQLService([[]])
+        decrypt_provider = FakeDecryptProvider(
+            {
+                "CASE-202": RowDecryptionResult(
+                    case_id="CASE-202",
+                    reported_persons_text='[{"mc":"王建国"}]',
+                    reporter_text="举报人甲",
+                    description_text="有效内容",
+                )
+            }
+        )
+        audit_logger = FakeAuditLogger()
+        service, _, _, _ = self.make_service(
+            mysql_service=mysql_service,
+            decrypt_provider=decrypt_provider,
+            audit_logger=audit_logger,
+        )
+
+        await service.rebuild_row(
+            request_id="req-rebuild-audit",
+            row=make_source_row("CASE-202"),
+        )
+
+        event = next(
+            item
+            for item in audit_logger.events
+            if item["event_type"] == "sync_single_row_completed"
+        )
+        self.assertEqual(event["details"]["mode"], "rebuild-row")
+        self.assertEqual(event["details"]["case_id"], "CASE-202")
+        self.assertEqual(event["details"]["upserted"], 1)
+
+
+class SyncInternalModuleTests(unittest.TestCase):
+    def test_decryption_coordinator_raises_for_result_count_mismatch(self):
+        coordinator = DecryptionCoordinator(decrypt_provider=FakeDecryptProvider({}))
+
+        with self.assertRaises(ServiceError) as context:
+            coordinator.validate_results(
+                rows=[make_source_row("CASE-301")],
+                decrypted_rows=[],
+            )
+
+        self.assertEqual(context.exception.error_code, "decrypt_result_mismatch")
+        self.assertEqual(context.exception.status_code, 500)
+
+    def test_decryption_coordinator_raises_for_result_order_mismatch(self):
+        coordinator = DecryptionCoordinator(decrypt_provider=FakeDecryptProvider({}))
+
+        with self.assertRaises(ServiceError) as context:
+            coordinator.validate_results(
+                rows=[make_source_row("CASE-302")],
+                decrypted_rows=[
+                    RowDecryptionResult(
+                        case_id="CASE-999",
+                        reported_persons_text='[{"mc":"王建国"}]',
+                        reporter_text="举报人甲",
+                        description_text="有效内容",
+                    )
+                ],
+            )
+
+        self.assertEqual(context.exception.error_code, "decrypt_result_order_mismatch")
+        self.assertEqual(context.exception.status_code, 500)
+
+    def test_source_case_mapper_fail_fast_raises_with_row_details(self):
+        mapper = SourceCaseMapper(telemetry=SyncTelemetry(audit_logger=FakeAuditLogger()))
+
+        with self.assertRaises(ServiceError) as context:
+            mapper.build_source_case_from_source_row(
+                row=make_source_row("CASE-303", petition_id=" "),
+                decrypted_row=RowDecryptionResult(
+                    case_id="CASE-303",
+                    reported_persons_text='[{"mc":"王建国"}]',
+                    reporter_text="举报人甲",
+                    description_text="有效内容",
+                ),
+                request_id="req-mapper",
+                fail_fast=True,
+            )
+
+        self.assertEqual(context.exception.error_code, "missing_petition_id")
+        self.assertEqual(
+            context.exception.details,
+            {
+                "case_id": "CASE-303",
+                "reason": "missing_petition_id",
+                "details": None,
+            },
+        )
+
+    def test_sync_telemetry_logs_batch_fallback_warning(self):
+        telemetry = SyncTelemetry(audit_logger=FakeAuditLogger())
+
+        with self.assertLogs("data_sync", level="WARNING") as context:
+            telemetry.log_batch_fallback(
+                request_id="req-telemetry",
+                batch_size=8,
+                valid_source_cases=3,
+                reason="embedding_failed",
+                details="Embedding request failed",
+            )
+
+        self.assertEqual(context.records[0].request_id, "req-telemetry")
+        self.assertEqual(context.records[0].batch_size, 8)
+        self.assertEqual(context.records[0].valid_source_cases, 3)
+        self.assertEqual(context.records[0].reason, "embedding_failed")
+        self.assertEqual(context.records[0].details, "Embedding request failed")
 
 
 class MySQLServiceTests(unittest.TestCase):
@@ -846,13 +961,30 @@ class QdrantServiceAsyncTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SyncEndpointTests(unittest.IsolatedAsyncioTestCase):
-    def make_request(self, container, request_id="req-endpoint"):
+    def make_request(self, container, payload=None, request_id="req-endpoint"):
         return SimpleNamespace(
             app=SimpleNamespace(state=SimpleNamespace(container=container)),
             state=SimpleNamespace(request_id=request_id),
+            json=self._build_json_reader(payload),
         )
 
-    async def test_incremental_endpoint_raises_not_supported(self):
+    def _build_json_reader(self, payload):
+        async def _reader():
+            return payload
+
+        return _reader
+
+    async def test_incremental_endpoint_is_marked_deprecated(self):
+        try:
+            from app.api.v1.endpoints.sync import router
+        except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
+            self.skipTest(str(exc))
+
+        incremental_route = next(route for route in router.routes if route.path == "/admin/sync/incremental")
+
+        self.assertTrue(incremental_route.deprecated)
+
+    async def test_incremental_endpoint_raises_deprecated_not_supported_error(self):
         try:
             from app.api.v1.endpoints.sync import trigger_incremental_sync
         except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
@@ -863,6 +995,8 @@ class SyncEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(context.exception.status_code, 501)
         self.assertEqual(context.exception.error_code, "incremental_not_supported")
+        self.assertIn("deprecated and not supported", context.exception.message)
+        self.assertIn("/admin/sync/rebuild-row", context.exception.message)
 
     async def test_full_sync_endpoint_returns_sync_response(self):
         try:
@@ -881,12 +1015,7 @@ class SyncEndpointTests(unittest.IsolatedAsyncioTestCase):
                     batches=1,
                 )
 
-        container = SimpleNamespace(
-            settings=SimpleNamespace(lock_timeout_seconds=0.05),
-            runtime_lock=asyncio.Lock(),
-            sync_lock=asyncio.Lock(),
-            sync_service=FakeSyncService(),
-        )
+        container = SimpleNamespace(sync_service=FakeSyncService())
 
         response = await trigger_full_sync(self.make_request(container))
 
@@ -912,12 +1041,7 @@ class SyncEndpointTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         sync_service = FakeSyncService()
-        container = SimpleNamespace(
-            settings=SimpleNamespace(lock_timeout_seconds=0.05),
-            runtime_lock=asyncio.Lock(),
-            sync_lock=asyncio.Lock(),
-            sync_service=sync_service,
-        )
+        container = SimpleNamespace(sync_service=sync_service)
         payload = RebuildRowRequest(
             case_id="CASE-030",
             source_wtxx_bh="XFJ-030",
@@ -929,7 +1053,9 @@ class SyncEndpointTests(unittest.IsolatedAsyncioTestCase):
             create_time=datetime(2024, 1, 1, tzinfo=timezone.utc),
         )
 
-        response = await trigger_rebuild_row(payload, self.make_request(container))
+        response = await trigger_rebuild_row(
+            self.make_request(container, payload=payload.model_dump(mode="json"))
+        )
 
         self.assertEqual(response.mode, "rebuild-row")
         self.assertEqual(response.total_upserted, 1)
@@ -949,12 +1075,7 @@ class SyncEndpointTests(unittest.IsolatedAsyncioTestCase):
                     status_code=502,
                 )
 
-        container = SimpleNamespace(
-            settings=SimpleNamespace(lock_timeout_seconds=0.05),
-            runtime_lock=asyncio.Lock(),
-            sync_lock=asyncio.Lock(),
-            sync_service=FakeSyncService(),
-        )
+        container = SimpleNamespace(sync_service=FakeSyncService())
         payload = RebuildRowRequest(
             case_id="CASE-031",
             source_wtxx_bh="XFJ-031",
@@ -968,12 +1089,74 @@ class SyncEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertLogs("sync_api", level="ERROR") as captured:
             with self.assertRaises(ServiceError):
-                await trigger_rebuild_row(payload, self.make_request(container, request_id="req-log"))
+                await trigger_rebuild_row(
+                    self.make_request(
+                        container,
+                        payload=payload.model_dump(mode="json"),
+                        request_id="req-log",
+                    )
+                )
 
         combined_logs = "\n".join(captured.output)
         self.assertIn("rebuild_row_failed", combined_logs)
         self.assertIn('"case_id":"CASE-031"', combined_logs)
         self.assertIn("req-log", combined_logs)
+
+    async def test_rebuild_row_endpoint_accepts_streamsets_event_wrapper(self):
+        try:
+            from app.api.v1.endpoints.sync import trigger_rebuild_row
+        except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
+            self.skipTest(str(exc))
+
+        class FakeSyncService:
+            async def rebuild_row(self, request_id, row):
+                self.last_row = row
+                return SyncRunResult(
+                    started_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    finished_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    mode="rebuild-row",
+                    total_read=1,
+                    total_upserted=1,
+                    batches=1,
+                )
+
+        sync_service = FakeSyncService()
+        container = SimpleNamespace(sync_service=sync_service)
+        event_payload = {
+            "BinLogPosition": 550399833,
+            "OldData": {
+                "encrypted_description": "old-cipher",
+                "create_time": 1777201253020,
+                "encrypted_reporter": "old-reporter",
+                "case_id": "CASE-040",
+                "petition_id": "PET-040",
+                "location": "旧地点",
+                "source_wtxx_bh": "XFJ-040",
+                "encrypted_reported_persons": "old-persons",
+            },
+            "encrypted_description": "new-cipher",
+            "create_time": 1777230053020,
+            "encrypted_reporter": "new-reporter",
+            "case_id": "CASE-040",
+            "petition_id": "PET-040",
+            "location": "新地点",
+            "source_wtxx_bh": "XFJ-040",
+            "encrypted_reported_persons": "new-persons",
+        }
+
+        response = await trigger_rebuild_row(
+            self.make_request(container, payload=event_payload, request_id="req-streamsets")
+        )
+
+        self.assertEqual(response.mode, "rebuild-row")
+        self.assertEqual(response.total_upserted, 1)
+        self.assertEqual(sync_service.last_row.case_id, "CASE-040")
+        self.assertEqual(sync_service.last_row.location, "新地点")
+        self.assertEqual(sync_service.last_row.encrypted_description, "new-cipher")
+        self.assertEqual(
+            sync_service.last_row.create_time,
+            datetime.fromtimestamp(1777230053020 / 1000.0, tz=timezone.utc),
+        )
 
 
 if __name__ == "__main__":

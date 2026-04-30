@@ -15,14 +15,21 @@ class FilterTests(unittest.TestCase):
         self.assertEqual(qdrant_filter.must[0].key, "reported_persons")
         self.assertEqual(qdrant_filter.must[0].match.any, ["王建国", "李四"])
         self.assertEqual(qdrant_filter.must[1].key, "create_time")
-        self.assertEqual(
-            qdrant_filter.must[1].range.gte,
-            "2021-01-01T00:00:00",
-        )
+        self.assertEqual(qdrant_filter.must[1].range.gte, datetime(2021, 1, 1, tzinfo=timezone.utc))
         self.assertEqual(
             qdrant_filter.must[1].range.lte,
-            "2026-12-31T00:00:00",
+            datetime(2026, 12, 31, tzinfo=timezone.utc),
         )
+
+    def test_build_case_filter_normalizes_naive_and_offset_datetimes_to_same_utc_instants(self):
+        qdrant_filter = build_case_filter(
+            ["王建国"],
+            datetime(2024, 1, 2, 8, 0, tzinfo=timezone.utc),
+            datetime(2024, 1, 3, 8, 0),
+        )
+
+        self.assertEqual(qdrant_filter.must[1].range.gte, datetime(2024, 1, 2, 8, 0, tzinfo=timezone.utc))
+        self.assertEqual(qdrant_filter.must[1].range.lte, datetime(2024, 1, 3, 8, 0, tzinfo=timezone.utc))
 
 
 if __name__ == "__main__":

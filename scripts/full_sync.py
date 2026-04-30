@@ -10,12 +10,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.bootstrap import build_container, close_container
 from app.config import get_settings
-from app.utils.logger import configure_logging
+from app.utils.logger import SYNC_FULL_LOG_CHANNEL, configure_logging
 
 
 async def main() -> None:
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.log_dir, default_channel=SYNC_FULL_LOG_CHANNEL)
     container = await build_container(settings)
     request_id = "full-sync-{0}".format(
         datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")

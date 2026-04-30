@@ -6,13 +6,13 @@ from typing import Any, List, Optional, Protocol, Sequence
 
 from app.config import Settings
 from app.errors import ServiceError
-from app.models.domain import JoinedSourceRow, RowDecryptionResult
+from app.models.domain import RowDecryptionResult, SourceTableRow
 
 
 class DecryptProvider(Protocol):
     async def decrypt_rows(
         self,
-        rows: Sequence[JoinedSourceRow],
+        rows: Sequence[SourceTableRow],
     ) -> List[RowDecryptionResult]:
         ...
 
@@ -23,7 +23,7 @@ class NoopDecryptProvider:
 
     async def decrypt_rows(
         self,
-        rows: Sequence[JoinedSourceRow],
+        rows: Sequence[SourceTableRow],
     ) -> List[RowDecryptionResult]:
         return [
             RowDecryptionResult(

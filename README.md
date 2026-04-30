@@ -33,7 +33,7 @@
   - `POST /api/v1/clues`
   - `POST /api/v1/admin/sync/full`
   - `POST /api/v1/admin/sync/rebuild-row`
-  - `POST /api/v1/admin/sync/incremental`（当前版本固定返回 `501`，仅保留占位）
+  - `POST /api/v1/admin/sync/incremental`（已弃用，当前固定返回 `501`）
   - `GET /health`
   - `GET /ready`
   - `GET /ready/sync`
@@ -169,6 +169,13 @@ flowchart LR
 
 #### `POST /api/v1/identify`
 
+接口约定：
+
+- 请求字段长期规范统一为 `snake_case`
+- 当前兼容 `startTime` / `endTime` 作为输入别名，内部会归一为 `start_time` / `end_time`
+- 未知字段会返回 `422`，不再静默忽略
+- 无时区时间会按 `UTC` 解释
+
 请求体：
 
 ```json
@@ -204,6 +211,12 @@ flowchart LR
 ```
 
 #### `POST /api/v1/clues`
+
+接口约定：
+
+- 请求字段统一使用 `snake_case`
+- 未知字段会返回 `422`
+- 字符串字段会先去除首尾空白，空白必填字段会直接报错
 
 请求体：
 
@@ -256,8 +269,10 @@ flowchart LR
 
 #### `POST /api/v1/admin/sync/incremental`
 
-- 当前版本固定返回 `501`
-- 用于明确提示：当前增量入口为 `POST /api/v1/admin/sync/rebuild-row`
+- 当前接口已弃用，并固定返回 `501`
+- 当前正式支持的同步模式只有：
+  - `POST /api/v1/admin/sync/full`
+  - `POST /api/v1/admin/sync/rebuild-row`
 - 保留该接口主要是为了避免调用方误用旧路径
 
 #### `POST /api/v1/admin/sync/full`
@@ -289,17 +304,21 @@ flowchart LR
 - `app/bootstrap.py`
   - 构建应用容器
   - 初始化各服务与引擎
-  - 注入运行锁和同步锁
 
 #### 识别链路
 
 - `app/core/pipeline.py`
-  - 串联识别与新线索两个主流程
+  - 作为薄 facade 暴露 `identify` / `clues` 入口
+  - 内部分发到独立的 `IdentifyFlow` 与 `ClueMiningFlow`
 - `app/core/filter.py`
   - 生成被举报人 + 时间过滤条件
 - `app/core/hybrid_search.py`
   - 触发 dense / sparse 双路召回
   - 使用 RRF 融合排序
+- `app/core/search_fallback.py`
+  - 在同人候选不足时执行保底补齐
+- `app/core/similar_case_mapper.py`
+  - 负责 `SearchCandidate -> SimilarCase` 映射
 - `app/core/rerank.py`
   - 使用 rerank 服务重新排序候选集
 - `app/core/llm_judge.py`
@@ -335,6 +354,12 @@ flowchart LR
 - 当前版本不再在 API 层对 `identify`、`clues`、`full_sync`、`rebuild-row` 做互斥加锁
 - 允许识别请求与同步请求并发进入，是否需要进一步做资源隔离由部署侧自行控制
 - 在离线单机单卡环境下，如并发较高，可能出现吞吐下降、显存抖动或模型侧超时，建议按实际资源情况控制调用节奏
+
+### 5.3.1 时间字段说明
+
+- `identify.start_time` / `identify.end_time`、`rebuild-row.create_time` 都接受 ISO8601 时间
+- 如果输入不带时区，系统按 `UTC` 解释
+- Qdrant 过滤层会统一转换成与当前 payload 存储格式兼容的时间字符串，避免“手工查询结果与接口过滤结果不一致”
 
 ### 5.4 Qdrant 设计
 
@@ -504,6 +529,9 @@ RERANK_BASE_URL=http://host.docker.internal:9002/v1
 LLM_MODEL=qwen3.5-27b-awq
 EMBEDDING_MODEL=bge-m3
 RERANK_MODEL=bge-reranker-v2-m3
+HYBRID_LOCATION_BOOST=0.03
+IDENTIFY_TOP_N=5
+JUDGE_TOP_N=5
 
 RUNTIME_NO_PROXY=localhost,127.0.0.1,host.docker.internal,mysql,qdrant
 
@@ -579,7 +607,7 @@ docker compose exec fastapi python scripts/full_sync.py
 
 ### 增量同步接口说明
 
-`POST /api/v1/admin/sync/incremental` 当前固定返回 `501`，用于明确提示“当前增量入口已切换为 rebuild-row”。
+`POST /api/v1/admin/sync/incremental` 当前已弃用，并固定返回 `501`，用于明确提示“当前系统不支持批量 incremental，同步入口为 rebuild-row”。
 
 当前实际增量入口为：
 
