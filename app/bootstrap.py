@@ -1,8 +1,7 @@
-import asyncio
 from typing import Optional
 
 from app.config import Settings, get_settings
-from app.container import ApplicationContainer
+from app.container import ApplicationContainer, ReadinessProbe
 from app.core.hybrid_search import HybridSearchEngine
 from app.core.llm_judge import LLMJudgeEngine
 from app.core.pipeline import IdentifyPipeline
@@ -86,25 +85,42 @@ async def build_container(settings: Optional[Settings] = None) -> ApplicationCon
     )
     return ApplicationContainer(
         settings=active_settings,
-        audit_logger=audit_logger,
-        qdrant_service=qdrant_service,
-        embedding_service=embedding_service,
-        rerank_service=rerank_service,
-        llm_service=llm_service,
-        mysql_service=mysql_service,
-        hybrid_search_engine=hybrid_search_engine,
-        rerank_engine=rerank_engine,
-        llm_judge_engine=llm_judge_engine,
         sync_service=sync_service,
         pipeline=pipeline,
-        runtime_lock=asyncio.Lock(),
-        sync_lock=asyncio.Lock(),
+        readiness_registry={
+            "default": (
+                ReadinessProbe(name="qdrant", check=qdrant_service.check_ready),
+                ReadinessProbe(name="embedding", check=embedding_service.check_ready),
+                ReadinessProbe(name="rerank", check=rerank_service.check_ready),
+                ReadinessProbe(name="llm", check=llm_service.check_ready),
+            ),
+            "sync": (
+                ReadinessProbe(name="mysql", check=mysql_service.check_ready),
+                ReadinessProbe(name="qdrant", check=qdrant_service.check_ready),
+                ReadinessProbe(name="embedding", check=embedding_service.check_ready),
+            ),
+        },
+        shutdown_callbacks=(
+            ("qdrant", qdrant_service.close),
+            ("embedding", embedding_service.close),
+            ("rerank", rerank_service.close),
+            ("llm", llm_service.close),
+            ("mysql", mysql_service.close),
+        ),
     )
 
 
 async def close_container(container: ApplicationContainer) -> None:
-    await container.qdrant_service.close()
-    await container.embedding_service.close()
-    await container.rerank_service.close()
-    await container.llm_service.close()
-    await container.mysql_service.close()
+    logger = get_logger("bootstrap")
+    for component, close_callback in container.shutdown_callbacks:
+        try:
+            await close_callback()
+        except Exception as exc:  # pragma: no cover - defensive cleanup path
+            logger.warning(
+                "container_shutdown_failed",
+                extra={
+                    "component": component,
+                    "error_type": exc.__class__.__name__,
+                    "detail": str(exc),
+                },
+            )

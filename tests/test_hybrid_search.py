@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from app.config import Settings
 from app.core.hybrid_search import HybridSearchEngine, reciprocal_rank_fusion
+from app.core.search_fallback import FallbackCandidateStrategy
 from app.models.domain import QueryEmbedding, SparseEmbedding
 from app.models.domain import SearchCandidate
 from app.models.request import IdentifyRequest
@@ -31,7 +32,14 @@ class HybridSearchTests(unittest.TestCase):
             description="王建国收礼",
         )
 
-        merged = reciprocal_rank_fusion(dense_hits, sparse_hits, request, k=60, limit=10)
+        merged = reciprocal_rank_fusion(
+            dense_hits,
+            sparse_hits,
+            request,
+            k=60,
+            limit=10,
+            location_boost=0.03,
+        )
 
         self.assertEqual(len(merged), 2)
         self.assertEqual({candidate.case_id for candidate in merged}, {"CASE-1", "CASE-2"})
@@ -201,6 +209,29 @@ class HybridSearchEngineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(qdrant_service.filtered_calls, 0)
         self.assertEqual([candidate.case_id for candidate in results], ["CASE-1", "CASE-2"])
+
+    async def test_fallback_strategy_skips_fetch_when_candidates_are_sufficient(self):
+        first_candidate = make_candidate("CASE-1", ["王建国"])
+        strategy = FallbackCandidateStrategy(
+            settings=Settings(
+                prompt_dir="prompts",
+                state_dir="data/app_state",
+                fallback_min_candidates=1,
+                fallback_max_fetch=5,
+            ),
+            qdrant_service=FakeQdrantService(
+                fallback_hits=[make_candidate("CASE-2", ["王建国"])],
+            ),
+        )
+
+        completion = await strategy.complete(
+            merged_hits=[first_candidate],
+            query_filter=None,
+        )
+
+        self.assertFalse(completion.triggered)
+        self.assertEqual(completion.added_count, 0)
+        self.assertEqual([candidate.case_id for candidate in completion.candidates], ["CASE-1"])
 
 
 if __name__ == "__main__":

@@ -1,15 +1,12 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 from qdrant_client.http import models
 
+from app.utils.time_utils import normalize_to_utc
+
 
 def _format_qdrant_datetime(value: datetime) -> str:
-    # Qdrant payload timestamps are currently stored as naive ISO strings.
-    # Normalize request times to UTC, then drop tzinfo so range filters match
-    # the stored payload format consistently.
-    if value.tzinfo is not None:
-        value = value.astimezone(timezone.utc).replace(tzinfo=None)
-    return value.isoformat()
+    return normalize_to_utc(value).isoformat()
 
 
 def build_case_filter(

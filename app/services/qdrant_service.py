@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import List, Sequence
+from typing import List, Sequence, Union
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models
@@ -8,6 +8,7 @@ from qdrant_client.http import models
 from app.config import Settings
 from app.errors import ServiceError
 from app.models.domain import QueryEmbedding, SearchCandidate, SourceCase
+from app.utils.time_utils import parse_utc_datetime, serialize_utc_datetime
 from app.utils.logger import get_logger
 
 
@@ -161,8 +162,8 @@ class QdrantService:
             "location_district": source_case.location_district,
             "reported_persons": source_case.reported_persons,
             "reporter": source_case.reporter,
-            "create_time": source_case.create_time.isoformat(),
-            "updated_at": source_case.updated_at.isoformat(),
+            "create_time": serialize_utc_datetime(source_case.create_time),
+            "updated_at": serialize_utc_datetime(source_case.updated_at),
             "description_text": source_case.description_text,
             "status": source_case.status,
             "extra": source_case.extra,
@@ -170,7 +171,7 @@ class QdrantService:
 
     def _point_to_candidate(
         self,
-        point: models.ScoredPoint | models.Record,
+        point: Union[models.ScoredPoint, models.Record],
         score_field: str,
     ) -> SearchCandidate:
         payload = point.payload or {}
@@ -190,15 +191,14 @@ class QdrantService:
         return SearchCandidate(**base_kwargs)
 
     def _parse_datetime(self, value):
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            return datetime.fromisoformat(value)
-        raise ServiceError(
-            error_code="qdrant_invalid_payload",
-            message="Qdrant payload is missing datetime values.",
-            status_code=500,
-        )
+        try:
+            return parse_utc_datetime(value)
+        except (TypeError, ValueError):
+            raise ServiceError(
+                error_code="qdrant_invalid_payload",
+                message="Qdrant payload is missing datetime values.",
+                status_code=500,
+            ) from None
 
     def _point_id_for_case(self, case_id: str) -> str:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, case_id))

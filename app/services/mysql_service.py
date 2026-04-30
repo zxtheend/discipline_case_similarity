@@ -3,7 +3,7 @@ from typing import Any, List, Optional
 
 from app.config import Settings
 from app.errors import ServiceError
-from app.models.domain import JoinedSourceRow, SourceTableRow
+from app.models.domain import SourceTableRow
 
 try:  # pragma: no cover - dependency is optional during local scaffolding
     import aiomysql
@@ -30,22 +30,6 @@ class MySQLService:
             async with connection.cursor() as cursor:
                 await cursor.execute("SELECT 1")
                 await cursor.fetchone()
-
-    async def fetch_joined_source_rows(
-        self,
-        limit: int,
-        last_case_id: Optional[str] = None,
-    ) -> List[JoinedSourceRow]:
-        pool = await self._ensure_pool()
-        query, params = self._build_joined_fetch_query(
-            limit=limit,
-            last_case_id=last_case_id,
-        )
-        async with pool.acquire() as connection:
-            async with connection.cursor(aiomysql.DictCursor) as db_cursor:
-                await db_cursor.execute(query, params)
-                rows = await db_cursor.fetchall()
-        return [self._parse_joined_row(row) for row in rows]
 
     async def fetch_source_rows(
         self,
@@ -96,47 +80,6 @@ class MySQLService:
             )
         return self._pool
 
-    def _build_joined_fetch_query(
-        self,
-        limit: int,
-        last_case_id: Optional[str],
-    ):
-        wtxx_table = self._validate_table_name(self._settings.mysql_wtxx_table, "mysql_wtxx_table")
-        xfj_table = self._validate_table_name(self._settings.mysql_xfj_table, "mysql_xfj_table")
-
-        conditions = ["1 = 1"]
-        params: List[Any] = []
-        if last_case_id:
-            conditions.append("w.C_BH > %s")
-            params.append(last_case_id)
-        where_clause = " AND ".join(conditions)
-        query = """
-            SELECT
-                w.C_BH AS case_id,
-                w.C_XFJ_BH AS source_wtxx_bh,
-                w.LC_YJMS AS encrypted_description,
-                w.DT_CJSJ AS create_time,
-                w.DT_ZHXGSJ AS w_updated_at,
-                x.C_BH AS petition_id,
-                x.C_BFYR_XX AS encrypted_reported_persons,
-                x.C_FYR_XX AS encrypted_reporter,
-                x.C_WTSD_QC AS location,
-                x.DT_CJSJ AS x_create_time,
-                x.DT_ZHXGSJ AS x_updated_at
-            FROM {wtxx_table} AS w
-            LEFT JOIN {xfj_table} AS x
-                ON w.C_XFJ_BH = x.C_BH
-            WHERE {where_clause}
-            ORDER BY w.C_BH ASC
-            LIMIT %s
-        """.format(
-            wtxx_table=wtxx_table,
-            xfj_table=xfj_table,
-            where_clause=where_clause,
-        )
-        params.append(limit)
-        return query, params
-
     def _build_source_fetch_query(
         self,
         limit: int,
@@ -177,21 +120,6 @@ class MySQLService:
             LIMIT 1
         """.format(source_table=source_table)
         return query, [case_id]
-
-    def _parse_joined_row(self, row: Any) -> JoinedSourceRow:
-        return JoinedSourceRow(
-            case_id=str(row["case_id"]),
-            source_wtxx_bh=row.get("source_wtxx_bh"),
-            petition_id=row.get("petition_id"),
-            encrypted_reported_persons=row.get("encrypted_reported_persons"),
-            encrypted_reporter=row.get("encrypted_reporter"),
-            encrypted_description=row.get("encrypted_description"),
-            location=row.get("location"),
-            create_time=row.get("create_time"),
-            w_updated_at=row.get("w_updated_at"),
-            x_create_time=row.get("x_create_time"),
-            x_updated_at=row.get("x_updated_at"),
-        )
 
     def _parse_source_row(self, row: Any) -> SourceTableRow:
         return SourceTableRow(
